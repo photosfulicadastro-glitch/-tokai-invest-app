@@ -38,3 +38,11 @@ test('500ms polling skips unchanged DOM and never overlaps requests',async()=>{
  await vm.runInContext('refresh(false)',a.context);assert.equal(a.renders,renders+1);
  a.document.hidden=true;a.interval.fn();assert.equal(requests,1);
 });
+
+test('execution markers use directional arrows with tips at the execution price',()=>{
+ const a=app();
+ vm.runInContext("data.state={symbol:'XAUUSD',candles:{M5:[{time:1000,open:2700,close:2701,low:2699,high:2702}]}};data.deals=[{id:'1',entry:0,side:'BUY',price:2700,time:1001},{id:'2',entry:0,side:'SELL',price:2701,time:1002},{id:'3',entry:1,side:'SELL',price:2700,time:1003}];",a.context);
+ const svg=vm.runInContext('candleView()',a.context);
+ for(const direction of ['buy','sell','exit'])assert(svg.includes(`data-marker="${direction}"`));
+ assert(!svg.includes('<circle'));assert.equal((svg.match(/<path /g)||[]).length,3);
+});
