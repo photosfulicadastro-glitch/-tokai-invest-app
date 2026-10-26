@@ -13,7 +13,7 @@ O convite vale 72 horas e é de uso único. O link só é mostrado na criação 
 
 Apenas Visão geral, Mercado, Operações e Histórico da conta principal, em modo de leitura. Nenhum usuário conecta sua própria conta MT5 ou envia ordens. Acesso à conexão MT5 e à gestão de usuários fica restrito ao administrador. Espelhamento, Minha conta, cadastro de sinais manuais e telas futuras foram retirados da navegação. O código reservado está em `archive/future-pages.js.txt` e no histórico Git, sem ser carregado pelo aplicativo.
 
-As posições, cotações, candles e execuções são consultadas a cada um segundo enquanto o painel está aberto. **Notificações push com o aplicativo fechado ainda não estão implementadas.** Esta versão não substitui essa etapa.
+As posições, cotações, candles e execuções são consultadas a cada um segundo enquanto o painel está aberto. **Notificações push estão disponíveis:** use “Ativar notificações”, autorize no aparelho e toque em “Testar notificação”. No iPhone, adicione à Tela de Início pelo Safari e abra pelo ícone (iOS 16.4+). Entradas, saídas parciais e fechamentos novos são notificados; recuperação do histórico não dispara alertas antigos.
 
 ## Segurança e persistência
 
@@ -30,3 +30,5 @@ As posições, cotações, candles e execuções são consultadas a cada um segu
 ## Verificação
 
 `npm test` cobre convites, uso único concorrente, senha incorreta, leitura, isolamento entre leitor/administrador/ingestão, persistência após reinício, bloqueio, logout, recuperação, expiração, limite de tentativas, CORS, navegação e escape de nomes. O PostgreSQL é a persistência de produção; os testes locais usam SQLite com o mesmo repositório SQL de autenticação.
+
+Em Acessos, você pode excluir usuários com confirmação e definir uma frase-senha administrativa com pelo menos 12 caracteres. Entre inicialmente com VIEWER_TOKEN; após salvar, use a nova senha. A chave original continua válida para recuperação. Nunca envie a chave administrativa aos leitores.

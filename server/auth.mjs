@@ -20,7 +20,7 @@ async function matches(password,stored){
  const got=(await passwordHash(password,salt)).split('$')[2];
  return typeof stored==='string'&&timingSafeEqual(Buffer.from(got,'hex'),Buffer.from(expected,'hex'));
 }
-export function createAuth(repo,now=()=>Date.now()){
+export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
  const attempts=new Map();let inFlight=0,lastCleanup=0;
  function throttle(key,max,ms){
   const time=now();for(const [k,v] of attempts)if(v.until<=time)attempts.delete(k);
@@ -31,11 +31,29 @@ export function createAuth(repo,now=()=>Date.now()){
  async function expensive(fn){if(inFlight>=2)throw new HttpError(429,'Servidor ocupado. Tente novamente em instantes.');inFlight++;try{return await fn();}finally{inFlight--;}}
  async function session(user){const value=secret(),expires=now()+12*60*60*1000;if(!await repo.session(digest(value),user,expires))throw new HttpError(401,'Acesso indisponível. Entre novamente.');return {token:value,expires_at:expires,user:publicUser(user)};}
  return {
-  async resolve(token){if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;const user=await repo.resolve(digest(token),now());return user?publicUser(user):null;},
+  async resolve(token){if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;if(await repo.resolveAdmin(digest(token),now()))return {role:'admin',name:'Administrador'};const user=await repo.resolve(digest(token),now());return user?publicUser(user):null;},
   async route(req,send,isAdmin,token){
    if(!req.url.startsWith('/v1/auth/')&&!req.url.startsWith('/v1/admin/'))return false;
    if(req.url.startsWith('/v1/admin/')&&!isAdmin)throw new HttpError(403,'Acesso administrativo necessário.');
    if(now()-lastCleanup>3600000){lastCleanup=now();await repo.cleanup(now());}
+   if(req.method==='POST'&&req.url==='/v1/auth/admin-login'){
+    throttle('admin-login',8,15*60000);const b=await readJson(req);
+    if(typeof b.password!=='string'||b.password.length>128)throw new HttpError(401,'Senha inválida.');
+    if(checkMaster(b.password)){send(200,{token:b.password,user:{role:'admin',name:'Administrador'}});return true;}
+    const admin=await repo.adminPassword();const ok=await expensive(()=>matches(b.password,admin?.password_hash));
+    if(!ok)throw new HttpError(401,'Senha administrativa inválida.');
+    const value=secret(),expires=now()+12*3600000;await repo.adminSession(digest(value),admin.version,expires);attempts.delete('admin-login');
+    send(200,{token:value,expires_at:expires,user:{role:'admin',name:'Administrador'}});return true;
+   }
+   if(req.method==='POST'&&req.url==='/v1/admin/password'){
+    throttle('admin-password',8,15*60000);const b=await readJson(req);
+    if(typeof b.password!=='string'||b.password.length<12||b.password.length>128)throw new HttpError(400,'Use uma frase-senha com 12 a 128 caracteres.');
+    if(!checkMaster(token)){
+     const admin=await repo.adminPassword();
+     if(typeof b.current!=='string'||b.current.length>128||!await expensive(()=>matches(b.current,admin?.password_hash)))throw new HttpError(401,'Senha atual inválida.');
+    }
+    await repo.setAdminPassword(await expensive(()=>passwordHash(b.password)));send(200,{ok:true});return true;
+   }
    if(req.method==='POST'&&req.url==='/v1/auth/login'){
     throttle('global-login',100,60000);const b=await readJson(req);
     const username=typeof b.username==='string'?b.username.trim().toLowerCase():'';
@@ -65,7 +83,8 @@ export function createAuth(repo,now=()=>Date.now()){
     send(201,{invite,expires_at:expires,username});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/admin/access'){
-    const b=await readJson(req);if(typeof b.id!=='string'||!['block','enable','reset'].includes(b.action))throw new HttpError(400,'Ação inválida.');
+    const b=await readJson(req);if(typeof b.id!=='string'||!['block','enable','reset','delete'].includes(b.action))throw new HttpError(400,'Ação inválida.');
+    if(b.action==='delete'){if(!await repo.remove(b.id))throw new HttpError(404,'Usuário não encontrado.');send(200,{ok:true});return true;}
     if(b.action==='reset'){
      const invite=secret(),expires=now()+72*3600000;const u=await repo.reset(b.id,digest(invite),expires);
      if(!u)throw new HttpError(404,'Usuário não encontrado.');send(200,{invite,expires_at:expires,username:u.username});return true;

@@ -1,0 +1,59 @@
+import test from 'node:test';
+import assert from 'node:assert/strict';
+import {sqliteStore} from '../server/storage.mjs';
+import {createPush,validateSubscription} from '../server/push.mjs';
+import {createApi} from '../server/server.mjs';
+const subscription={endpoint:'https://fcm.googleapis.com/fcm/send/testing',keys:{p256dh:'A'.repeat(87),auth:'A'.repeat(22)}};
+const deal=(id,entry=0)=>({id,position_id:'1',entry,side:'BUY',volume:.01,price:4000,time:1000,profit:0,commission:0,swap:0,fee:0});
+const state=(time,deals=[])=>({source:'principal',symbol:'XAUUSD',observed_at:time/1000,currency:'USD',bid:4000,ask:4001,positions:[],deals});
+test('push persiste chaves, deduplica execuções, suprime histórico e revoga usuários',async()=>{
+ const db=sqliteStore(':memory:');let time=Date.now();const delivered=[];
+ const push=await createPush(db.push,{now:()=>time,transport:async(s,b)=>delivered.push(JSON.parse(b))});
+ const a=await db.push.config({}),b=await db.push.config({});assert.equal(a.publicKey,b.publicKey);
+ await db.push.subscribe({role:'admin'},subscription,time);
+ await db.save(state(time,[deal('1')]),time);await push.drain();assert.equal(delivered.length,0);
+ time+=1000;await db.save(state(time,[deal('1'),deal('2')]),time);await push.drain();assert.equal(delivered.length,1);
+ await db.save(state(time,[deal('2')]),time);await push.drain();assert.equal(delivered.length,1);
+ time+=1000;await db.save(state(time,[deal('3',1)]),time);await push.drain();assert.match(delivered[1].title,/Fechamento/);
+ time+=60000;await db.save(state(time,[deal('4')]),time);await push.drain();assert.equal(delivered.length,2);
+ await db.auth.create({id:'u',username:'tester',name:'Teste',hash:'h',expires:time+10000,now:time});await db.auth.redeem('h','password-hash',time);
+ await db.push.subscribe({role:'reader',id:'u'},subscription,time);
+ time+=1000;await db.save(state(time,[deal('5')]),time);await db.auth.change('u','blocked');await push.drain();assert.equal(delivered.length,2);
+ await db.auth.change('u','active');await push.drain();assert.equal(delivered.length,2,'enable does not resurrect subscriptions');
+ await db.push.subscribe({role:'reader',id:'u'},subscription,time);time+=1000;await db.save(state(time,[deal('6')]),time);await db.auth.remove('u');await push.drain();assert.equal(delivered.length,2);
+ assert.equal((await db.auth.list()).length,0);
+ assert.throws(()=>validateSubscription({...subscription,endpoint:'https://127.0.0.1/secret'}));
+ assert.throws(()=>validateSubscription({...subscription,endpoint:'https://fcm.googleapis.com.evil.test/'}));
+ await db.close();
+});
+test('push preserva fila para retry, expira e remove inscrição inválida',async()=>{
+ const db=sqliteStore(':memory:');let time=Date.now(),count=0,fail=503;
+ const push=await createPush(db.push,{now:()=>time,transport:async()=>{count++;if(fail)throw {statusCode:fail};}});
+ await db.push.subscribe({role:'admin'},subscription,time);await db.save(state(time),time);
+ time+=1000;await db.save(state(time,[deal('1')]),time);await push.drain();assert.equal(count,1);
+ await push.drain();assert.equal(count,1);time+=11000;fail=0;await push.drain();assert.equal(count,2);
+ time+=1000;await db.save(state(time,[deal('2')]),time);time+=121000;await push.drain();assert.equal(count,2);
+ await db.save(state(time),time);time+=1000;await db.save(state(time,[deal('3')]),time);fail=410;await push.drain();assert.equal(await db.push.own({role:'admin'},subscription.endpoint),undefined);await db.close();
+});
+test('senha administrativa, recuperação pela chave, sessões revogadas e exclusão autorizada',async()=>{
+ const master='v'.repeat(64),server=createApi({dbPath:':memory:',ingestToken:'i'.repeat(64),viewerToken:master});await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const base=`http://127.0.0.1:${server.address().port}`;
+ const call=async(path,body,token='')=>{const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json()};};
+ try{
+  assert.equal((await call('/v1/admin/password',{password:'frase segura inicial'},master)).status,200);
+  assert.equal((await call('/v1/auth/admin-login',{password:'errada'})).status,401);
+  const first=await call('/v1/auth/admin-login',{password:'frase segura inicial'});assert.equal(first.status,200);const token=first.body.token;assert.notEqual(token,master);
+  assert.equal((await call('/v1/admin/users',undefined,token)).status,200);
+  assert.equal((await call('/v1/admin/password',{password:'outra frase segura',current:'errada'},token)).status,401);
+  assert.equal((await call('/v1/admin/password',{password:'outra frase segura',current:'frase segura inicial'},token)).status,200);
+  assert.equal((await call('/v1/admin/users',undefined,token)).status,403);
+  assert.equal((await call('/v1/auth/admin-login',{password:master})).status,200);
+  const invite=await call('/v1/admin/invites',{name:'Disposable',username:'disposable'},master);
+  const reader=await call('/v1/auth/activate',{invite:invite.body.invite,password:'senha usuario teste'});
+  const users=await call('/v1/admin/users',undefined,master);const id=users.body.users[0].id;
+  assert.equal((await call('/v1/admin/access',{id,action:'delete'},reader.body.token)).status,403);
+  assert.equal((await call('/v1/admin/access',{id,action:'delete'},master)).status,200);
+  assert.equal((await call('/v1/me',undefined,reader.body.token)).status,401);
+  assert.equal((await call('/v1/admin/users',undefined,master)).body.users.length,0);
+ }finally{await new Promise(r=>server.close(r));}
+});

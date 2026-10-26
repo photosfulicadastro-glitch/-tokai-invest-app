@@ -25,7 +25,7 @@ As tabelas de autenticação são adicionais às tabelas de operações. O monit
 
 ## Limites atuais
 
-- Notificações push com o aplicativo fechado, cadastro público, assinaturas, pagamentos e cópia de operações não estão implementados.
+- Cadastro público, assinaturas, pagamentos e cópia de operações não estão implementados. Notificações Web Push de entradas, saídas parciais e fechamentos estão disponíveis mediante autorização do aparelho.
 - Sinais são exibidos enquanto o painel está aberto; a distribuição inicial é por convite a um grupo pequeno.
 - SL/TP são amostrados; alterações transitórias entre snapshots não são auditadas.
 - Execuções são individuais, incluindo fechamentos parciais, e não um relatório agregado de desempenho. Lançamentos separados de saldo/taxas não são incluídos.
@@ -35,3 +35,13 @@ As tabelas de autenticação são adicionais às tabelas de operações. O monit
 ## Verificação
 
 `npm test` testa ingestão, autenticação, autorização, convites, recuperação, persistência, validade de candles e navegação. Os testes usam SQLite e o mesmo repositório SQL de autenticação utilizado com PostgreSQL. `node --check live.js` verifica a sintaxe do frontend.
+
+## Notificações e administração
+
+- Ativar notificações, testar e desativar no próprio aparelho. No iPhone, iOS 16.4+ e instalação na Tela de Início pelo Safari. Manifest e ícones usam a marca existente, sem cache de credenciais ou dados.
+- VAPID gerado uma vez e persistido no banco; a chave privada nunca é enviada ao cliente. Inscrições e fila durável ficam no PostgreSQL. Endpoints limitados aos provedores Apple, Google e Mozilla.
+- Eventos são enfileirados na mesma transação de inserção de novas execuções, com deduplicação por ticket+inscrição. Não alertamos importação inicial, lotes de recuperação ou o primeiro recebimento depois de mais de 30 segundos sem transmissão. O histórico continua sincronizado.
+- Retentativas por até 2 minutos, até 5 tentativas. Não há garantia de latência nem de entrega; em queda entre aceitação pelo provedor e confirmação no banco, pode haver reenvio (tag estável no aparelho). Pausa do Render gratuito e rede/OS podem atrasar alertas. MT5 deve permanecer conectado.
+- Bloquear, excluir ou redefinir acesso invalida inscrições antigas por versão. Sair remove a inscrição do aparelho quando a rede está disponível. Vencimento de sessão não interrompe push de usuários ainda ativos; reautenticação segue necessária para abrir dados.
+- Acessos inclui Excluir com confirmação e criação/troca da senha administrativa (12 a 128 caracteres), protegida por scrypt. Chave inicial continua como recuperação. Troca de senha revoga sessões administrativas anteriores.
+- Alterações de SL/TP não geram push nesta versão. Não operar durante testes automatizados: os testes usam banco local e transporte simulado.
