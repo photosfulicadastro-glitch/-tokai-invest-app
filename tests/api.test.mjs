@@ -40,6 +40,9 @@ test('candles: compatibilidade, persistência, atualização e rejeição de OHL
   const candles={M1:[b],M5:[b],M15:[b]};
   assert.equal((await post({...base,candles})).status,200);
   assert.deepEqual((await get()).state.candles,candles);
+  assert.equal((await post({...base,bid:4002})).status,200);
+  assert.deepEqual((await get()).state.candles,candles); // Lightweight snapshots keep last candle batch.
+  assert.equal((await get()).state.bid,4002);
   const updated={...candles,M1:[{...b,close:4004}]};
   assert.equal((await post({...base,candles:updated})).status,200);
   assert.equal((await get()).state.candles.M1[0].close,4004);
