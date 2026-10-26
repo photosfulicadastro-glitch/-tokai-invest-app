@@ -27,3 +27,26 @@ test('autorização, sincronização idempotente, validação, offline e persist
  const cors=await fetch(`http://127.0.0.1:${server.address().port}/v1/state`,{headers:{Origin:'https://evil.example',Authorization:'Bearer '+viewerToken}});assert.equal(cors.status,403);
  }finally{await stop();rmSync(dir,{recursive:true});}
 });
+test('candles: compatibilidade, persistência, atualização e rejeição de OHLC inválido',async()=>{
+ const server=createApi({dbPath:':memory:',ingestToken:'i'.repeat(40),viewerToken:'v'.repeat(40)});
+ await new Promise(r=>server.listen(0,'127.0.0.1',r));
+ const url=`http://127.0.0.1:${server.address().port}`;
+ const post=p=>fetch(url+'/v1/snapshot',{method:'POST',headers:{Authorization:'Bearer '+'i'.repeat(40),'Content-Type':'application/json'},body:JSON.stringify(p)});
+ const get=async()=>await(await fetch(url+'/v1/state',{headers:{Authorization:'Bearer '+'v'.repeat(40)}})).json();
+ const base={source:'principal',symbol:'XAUUSD',currency:'JPY',observed_at:Math.floor(Date.now()/1000),bid:4000,ask:4001,positions:[],deals:[]};
+ const b={time:1800000000,open:4000,high:4005,low:3990,close:4002};
+ try{
+  assert.equal((await post(base)).status,200);
+  const candles={M1:[b],M5:[b],M15:[b]};
+  assert.equal((await post({...base,candles})).status,200);
+  assert.deepEqual((await get()).state.candles,candles);
+  const updated={...candles,M1:[{...b,close:4004}]};
+  assert.equal((await post({...base,candles:updated})).status,200);
+  assert.equal((await get()).state.candles.M1[0].close,4004);
+  for(const bars of [[{...b,high:3999}],[{...b,low:4001}],[b,b],[{...b,close:null}],Array(301).fill(b)]){
+   assert.equal((await post({...base,candles:{...candles,M1:bars}})).status,400);
+  }
+  assert.equal((await get()).state.candles.M1[0].close,4004);
+  assert.equal((await post({...base,candles:{M1:[],M5:[],M15:[]}})).status,200);
+ }finally{await new Promise(r=>server.close(r));}
+});

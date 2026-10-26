@@ -1,5 +1,5 @@
 #property strict
-#property version "1.00"
+#property version "1.10"
 // Monitor somente leitura. Instalar em gráfico separado do robô.
 input string ApiUrl="";
 input string IngestToken="";
@@ -12,6 +12,18 @@ string cursorKey;
 string Q(string s){StringReplace(s,"\\","\\\\");StringReplace(s,"\"","\\\"");StringReplace(s,"\r"," ");StringReplace(s,"\n"," ");return "\""+s+"\"";}
 string N(double x){return DoubleToString(x,8);}
 string ID(ulong x){return Q(StringFormat("%I64u",x));}
+// Candle timestamps use broker time, as do deal timestamps.
+string CandleSeries(ENUM_TIMEFRAMES period){
+ MqlRates rates[];ArraySetAsSeries(rates,false);
+ int copied=CopyRates(GoldSymbol,period,0,180,rates);
+ if(copied<=0)return "[]";
+ string result="[";
+ for(int i=0;i<copied;i++){
+  if(i>0)result+=",";
+  result+="{\"time\":"+IntegerToString(rates[i].time)+",\"open\":"+N(rates[i].open)+",\"high\":"+N(rates[i].high)+",\"low\":"+N(rates[i].low)+",\"close\":"+N(rates[i].close)+"}";
+ }
+ return result+"]";
+}
 int OnInit(){
  if(StringFind(ApiUrl,"https://")!=0||StringLen(IngestToken)<32||ExpectedAccount==0||HistoryDays<1||HistoryDays>365)return INIT_PARAMETERS_INCORRECT;
  if(AccountInfoInteger(ACCOUNT_LOGIN)!=ExpectedAccount)return INIT_FAILED;
@@ -46,6 +58,8 @@ void OnTimer(){
  }
  MqlTick tick;if(!SymbolInfoTick(GoldSymbol,tick))return;
  string payload="{\"source\":"+Q(Source)+",\"symbol\":"+Q(GoldSymbol)+",\"currency\":"+Q(AccountInfoString(ACCOUNT_CURRENCY))+",\"observed_at\":"+IntegerToString(TimeGMT())+",\"bid\":"+N(tick.bid)+",\"ask\":"+N(tick.ask)+",\"positions\":["+ps+"],\"deals\":["+ds+"]}";
+ string candles="{\"M1\":"+CandleSeries(PERIOD_M1)+",\"M5\":"+CandleSeries(PERIOD_M5)+",\"M15\":"+CandleSeries(PERIOD_M15)+"}";
+ payload=StringSubstr(payload,0,StringLen(payload)-1)+",\"candles\":"+candles+"}";
  char data[],response[];string headers;
  int size=StringToCharArray(payload,data,0,WHOLE_ARRAY,CP_UTF8);ArrayResize(data,size-1);
  int code=WebRequest("POST",ApiUrl+"/v1/snapshot","Content-Type: application/json\r\nAuthorization: Bearer "+IngestToken+"\r\n",5000,data,response,headers);

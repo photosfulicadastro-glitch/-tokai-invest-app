@@ -39,6 +39,18 @@ function validate(s,source){
  if(!['bid','ask'].every(k=>num(s[k])&&s[k]>=0))fail();
  for(const p of s.positions)if(!id(p.id)||!['BUY','SELL'].includes(p.side)||!['volume','price','sl','tp','profit'].every(k=>num(p[k]))||p.volume<=0)fail();
  for(const d of s.deals)if(!id(d.id)||!id(d.position_id)||!['BUY','SELL'].includes(d.side)||![0,1,2,3].includes(d.entry)||!['time','volume','price','profit','commission','swap','fee'].every(k=>num(d[k]))||d.volume<=0)fail();
+ // Optional for compatibility with monitor 1.00. Series are oldest first.
+ if(s.candles!==undefined){
+  if(!s.candles||Array.isArray(s.candles)||typeof s.candles!=='object'||Object.keys(s.candles).some(k=>!['M1','M5','M15'].includes(k)))fail();
+  for(const tf of ['M1','M5','M15']){
+   const bars=s.candles[tf];if(!Array.isArray(bars)||bars.length>300)fail();
+   let last=0;
+   for(const bar of bars){
+    if(!bar||!Number.isSafeInteger(bar.time)||bar.time<=last||!['open','high','low','close'].every(k=>num(bar[k])&&bar[k]>0)||bar.high<Math.max(bar.open,bar.close)||bar.low>Math.min(bar.open,bar.close))fail();
+    last=bar.time;
+   }
+  }
+ }
  if(new Set(s.positions.map(p=>p.id)).size!==s.positions.length)fail();
 }
 if(process.argv[1]&&import.meta.url===new URL(process.argv[1],'file:').href){
