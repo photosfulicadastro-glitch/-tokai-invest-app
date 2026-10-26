@@ -54,7 +54,7 @@ test('senha administrativa, recuperação pela chave, sessões revogadas e exclu
   assert.equal((await call('/v1/admin/users',undefined,token)).status,403);
   assert.equal((await call('/v1/auth/admin-login',{password:master})).status,200);
   const invite=await call('/v1/admin/invites',{name:'Disposable',username:'disposable'},master);
-  const reader=await call('/v1/auth/activate',{invite:invite.body.invite,password:'senha usuario teste'});
+  const reader=await call('/v1/auth/activate',{invite:invite.body.invite,password:'Senha9!xy'});
   const users=await call('/v1/admin/users',undefined,master);const id=users.body.users[0].id;
   assert.equal((await call('/v1/admin/access',{id,action:'delete'},reader.body.token)).status,403);
   assert.equal((await call('/v1/admin/access',{id,action:'delete'},master)).status,200);

@@ -66,7 +66,7 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
    if(req.method==='POST'&&req.url==='/v1/auth/activate'){
     throttle('global-activate',30,60000);const b=await readJson(req);
     if(typeof b.invite!=='string'||!/^[-_A-Za-z0-9]{43}$/.test(b.invite))throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
-    if(typeof b.password!=='string'||b.password.length<12||b.password.length>128)throw new HttpError(400,'Use uma senha com 12 a 128 caracteres.');
+    if(typeof b.password!=='string'||b.password.length!==9)throw new HttpError(400,'Use uma senha com exatamente 9 caracteres.');
     const hash=digest(b.invite);if(!await repo.invite(hash))throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
     const password=await expensive(()=>passwordHash(b.password));const u=await repo.redeem(hash,password,now());
     if(!u)throw new HttpError(400,'Convite inválido, utilizado ou expirado.');send(200,await session(u));return true;

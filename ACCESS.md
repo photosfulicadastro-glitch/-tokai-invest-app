@@ -5,7 +5,7 @@
 2. Use a chave atual `VIEWER_TOKEN` (Render → Environment). Essa chave é exclusiva do responsável: não distribua.
 3. Abra **Acessos**, informe nome e um nome de usuário (por exemplo `maria.silva`) e clique em **Gerar convite**.
 4. Copie o link e envie individualmente à pessoa, junto com o nome de usuário. O aplicativo não envia e-mails ou mensagens automaticamente.
-5. O convidado abre o link, cria uma senha de pelo menos 12 caracteres e passa a usar seu nome de usuário e senha.
+5. O convidado abre o link, cria uma senha de exatamente 9 caracteres e passa a usar seu nome de usuário e senha.
 
 O convite vale 72 horas e é de uso único. O link só é mostrado na criação e não fica armazenado em texto no banco. Para reenviar, gere **Novo convite**. Essa ação também invalida a senha e as sessões anteriores. **Bloquear** impede novas consultas e revoga as sessões; **Liberar** exige um novo login. Um convite bloqueado precisa de um novo convite para ser ativado.
 
