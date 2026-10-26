@@ -1,5 +1,5 @@
 #property strict
-#property version "1.10"
+#property version "1.20"
 // Monitor somente leitura. Instalar em gráfico separado do robô.
 input string ApiUrl="";
 input string IngestToken="";
@@ -8,6 +8,7 @@ input string GoldSymbol="XAUUSD";
 input long ExpectedAccount=0;
 input int HistoryDays=30;
 datetime cursor=0;
+ulong lastCandlesSent=0;
 string cursorKey;
 string Q(string s){StringReplace(s,"\\","\\\\");StringReplace(s,"\"","\\\"");StringReplace(s,"\r"," ");StringReplace(s,"\n"," ");return "\""+s+"\"";}
 string N(double x){return DoubleToString(x,8);}
@@ -30,7 +31,7 @@ int OnInit(){
  if(!SymbolSelect(GoldSymbol,true))return INIT_FAILED;
  cursorKey="Tokai_"+IntegerToString(ExpectedAccount)+"_"+Source+"_"+GoldSymbol;
  cursor=GlobalVariableCheck(cursorKey)?(datetime)GlobalVariableGet(cursorKey):TimeCurrent()-HistoryDays*86400;
- EventSetTimer(5);return INIT_SUCCEEDED;
+ EventSetTimer(1);return INIT_SUCCEEDED;
 }
 void OnDeinit(const int reason){EventKillTimer();}
 void OnTimer(){
@@ -58,10 +59,13 @@ void OnTimer(){
  }
  MqlTick tick;if(!SymbolInfoTick(GoldSymbol,tick))return;
  string payload="{\"source\":"+Q(Source)+",\"symbol\":"+Q(GoldSymbol)+",\"currency\":"+Q(AccountInfoString(ACCOUNT_CURRENCY))+",\"observed_at\":"+IntegerToString(TimeGMT())+",\"bid\":"+N(tick.bid)+",\"ask\":"+N(tick.ask)+",\"positions\":["+ps+"],\"deals\":["+ds+"]}";
+ bool sendCandles=lastCandlesSent==0 || GetTickCount64()-lastCandlesSent>=10000;
+ if(sendCandles){
  string candles="{\"M1\":"+CandleSeries(PERIOD_M1)+",\"M5\":"+CandleSeries(PERIOD_M5)+",\"M15\":"+CandleSeries(PERIOD_M15)+"}";
  payload=StringSubstr(payload,0,StringLen(payload)-1)+",\"candles\":"+candles+"}";
+ }
  char data[],response[];string headers;
  int size=StringToCharArray(payload,data,0,WHOLE_ARRAY,CP_UTF8);ArrayResize(data,size-1);
  int code=WebRequest("POST",ApiUrl+"/v1/snapshot","Content-Type: application/json\r\nAuthorization: Bearer "+IngestToken+"\r\n",5000,data,response,headers);
- if(code==200){cursor=next;GlobalVariableSet(cursorKey,(double)cursor);}else Print("TOKAI: falha de envio HTTP ",code,"; erro ",GetLastError());
+ if(code==200){if(sendCandles)lastCandlesSent=GetTickCount64();cursor=next;GlobalVariableSet(cursorKey,(double)cursor);}else Print("TOKAI: falha de envio HTTP ",code,"; erro ",GetLastError());
 }

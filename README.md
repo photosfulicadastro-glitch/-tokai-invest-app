@@ -5,7 +5,7 @@ Painel de consulta para XAUUSD: Visão geral, Mercado, Operações e Histórico.
 ## Funcionamento
 
 - Frontend estático no GitHub Pages; API Node 24 com PostgreSQL no Render gratuito.
-- Monitor `mt5/TokaiMonitor.mq5` 1.10 somente leitura: posições, SL/TP, execuções, bid/ask, moeda da conta e até 180 candles de cada período M1/M5/M15. Atualização a cada cinco segundos com MT5 conectado.
+- Monitor `mt5/TokaiMonitor.mq5` 1.20 somente leitura: posições, SL/TP, execuções, bid/ask, moeda da conta e até 180 candles de cada período M1/M5/M15. Posições e execuções são enviadas a cada segundo; candles a cada dez segundos, com MT5 conectado. A rede e o processamento acrescentam latência.
 - Histórico por ticket textual, com reenvio idempotente, recuperação via cursor local e carga inicial de 30 dias. Horários das velas/execuções são os da corretora; recebimento é exibido no horário do Japão.
 - Monitor acompanha todas as operações do símbolo configurado na conta, inclusive manuais. Não filtra Magic Number.
 - Último estado permanece visível como desatualizado quando o recebimento para. O painel consulta até 1.000 execuções; o banco conserva as demais.

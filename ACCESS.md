@@ -13,7 +13,7 @@ O convite vale 72 horas e é de uso único. O link só é mostrado na criação 
 
 Apenas Visão geral, Mercado, Operações e Histórico da conta principal, em modo de leitura. Nenhum usuário conecta sua própria conta MT5 ou envia ordens. Acesso à conexão MT5 e à gestão de usuários fica restrito ao administrador. Espelhamento, Minha conta, cadastro de sinais manuais e telas futuras foram retirados da navegação. O código reservado está em `archive/future-pages.js.txt` e no histórico Git, sem ser carregado pelo aplicativo.
 
-As posições, cotações, candles e execuções são consultadas a cada cinco segundos enquanto o painel está aberto. **Notificações push com o aplicativo fechado ainda não estão implementadas.** Esta versão não substitui essa etapa.
+As posições, cotações, candles e execuções são consultadas a cada um segundo enquanto o painel está aberto. **Notificações push com o aplicativo fechado ainda não estão implementadas.** Esta versão não substitui essa etapa.
 
 ## Segurança e persistência
 

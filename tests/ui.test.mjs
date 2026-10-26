@@ -4,7 +4,7 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 test('leitor vê somente quatro áreas; páginas administrativas e futuras ficam inacessíveis',()=>{
  const root={innerHTML:''},element={addEventListener(){}};
- const context=vm.createContext({document:{getElementById:id=>id==='root'?root:element,querySelectorAll:()=>[]},window:{TOKAI_API_URL:'https://tokai-invest-api.onrender.com',history:{replaceState(){}},scrollTo(){}},location:{hash:'',pathname:'/-tokai-invest-app/',origin:'https://photosfulicadastro-glitch.github.io',search:''},sessionStorage:{getItem(){return '';},removeItem(){}},URL,URLSearchParams,Date,AbortSignal,setInterval(){}});
+ const context=vm.createContext({document:{addEventListener(){},getElementById:id=>id==='root'?root:element,querySelectorAll:()=>[]},window:{TOKAI_API_URL:'https://tokai-invest-api.onrender.com',history:{replaceState(){}},scrollTo(){}},location:{hash:'',pathname:'/-tokai-invest-app/',origin:'https://photosfulicadastro-glitch.github.io',search:''},sessionStorage:{getItem(){return '';},removeItem(){}},URL,URLSearchParams,Date,AbortSignal,setInterval(){}});
  vm.runInContext(readFileSync(new URL('../live.js',import.meta.url),'utf8'),context);
  assert(root.innerHTML.includes('Nome de usuário'));assert(!root.innerHTML.includes('Explorar protótipo'));
  vm.runInContext("token='test';identity={role:'reader',name:'Leitor'};data={state:null,deals:[],online:false};render();",context);
