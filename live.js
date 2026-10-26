@@ -2,6 +2,7 @@
 const root=document.getElementById('root');
 let page='home',token='',data=null,error='',busy=false,tf='M5';
 let nav=[];
+let followCandles=true,chartScrollLeft=0,lastCandleStale=false;
 const readerNav=[['home','⌂','Visão geral'],['market','▥','Mercado'],['trades','▤','Operações'],['history','◷','Histórico']];
 let identity=null,authMode='reader',authBusy=false,adminUsers=[],adminMessage='',inviteResult=null;
 let inviteCode=new URLSearchParams(location.hash.slice(1)).get('convite')||'';
@@ -22,7 +23,7 @@ async function api(path,body,access=token){
  const result=await r.json();if(!r.ok){const e=Error(result.error||'Não foi possível concluir.');e.status=r.status;throw e;}return result;
 }
 function remember(){try{if(identity?.role==='reader')sessionStorage.setItem('tokai.session',token);else sessionStorage.removeItem('tokai.session');}catch{}}
-function clearAccess(){token='';identity=null;data=null;page='home';adminUsers=[];inviteResult=null;adminMessage='';remember();updateNav();}
+function clearAccess(){token='';identity=null;data=null;page='home';followCandles=true;chartScrollLeft=0;adminUsers=[];inviteResult=null;adminMessage='';remember();updateNav();}
 async function logout(){try{await window.tokaiPush?.disable(api);}catch{}const previous=token;clearAccess();error='';login();try{await api('/v1/auth/logout',{},previous);}catch{}}
 function login(){
  const activating=!!inviteCode,admin=authMode==='admin'&&!activating;
@@ -75,10 +76,10 @@ function candleView(){
  const ticks=Array.from({length:5},(_,i)=>{const n=Math.round((bars.length-1)*i/4);return `<text x="${x(n)}" y="${H-10}" fill="#91a3b8" font-size="11" text-anchor="middle">${clock(bars[n].time)}</text>`;}).join('');
  const bodies=bars.map((b,i)=>{const color=b.close>=b.open?'#10d7a0':'#ff4c64';return `<g><title>${date(b.time)} | A ${b.open} · Máx ${b.high} · Mín ${b.low} · F ${b.close}</title><line x1="${x(i)}" x2="${x(i)}" y1="${y(b.high)}" y2="${y(b.low)}" stroke="${color}"/><rect x="${x(i)-bw/2}" y="${y(Math.max(b.open,b.close))}" width="${bw}" height="${Math.max(1,y(Math.min(b.open,b.close))-y(Math.max(b.open,b.close)))}" fill="${color}"/></g>`;}).join('');
  const seconds={M1:60,M5:300,M15:900}[tf];
- const marks=(data.deals||[]).map(d=>{const i=bars.findIndex(b=>d.time>=b.time&&d.time<b.time+seconds);if(i<0||d.price<low||d.price>high)return '';const label=d.entry===0?side(d.side):d.entry===2?'REVERSÃO':'SAÍDA';const color=d.entry===0?(d.side==='BUY'?'#10d7a0':'#ff4c64'):'#f4bf48';return `<g><title>${label} · ${esc(d.id)} · ${date(d.time)} · ${num(d.price)}</title><circle cx="${x(i)}" cy="${y(d.price)}" r="4" fill="${color}" stroke="#071321"/></g>`;}).join('');
+ const marks=(data.deals||[]).map(d=>{const i=bars.findIndex(b=>d.time>=b.time&&d.time<b.time+seconds);if(i<0||d.price<low||d.price>high)return '';const label=d.entry===0?side(d.side):d.entry===2?'REVERSÃO':'SAÍDA';const color=d.entry===0?(d.side==='BUY'?'#10d7a0':'#ff4c64'):'#f4bf48';const direction=d.entry!==0?'exit':d.side==='BUY'?'buy':'sell';const shape=direction==='buy'?'M0 0 L-6 9 H-2 V16 H2 V9 H6 Z':direction==='sell'?'M0 0 L-6 -9 H-2 V-16 H2 V-9 H6 Z':'M0 0 L-9 -6 V-2 H-16 V2 H-9 V6 Z';return `<g data-marker="${direction}" transform="translate(${x(i)} ${y(d.price)})"><title>${label} · ${esc(d.id)} · ${date(d.time)} · ${num(d.price)}</title><path d="${shape}" fill="${color}" stroke="#071321" stroke-width="1" vector-effect="non-scaling-stroke"/></g>`;}).join('');
  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Candles reais de ${esc(data.state.symbol)} em ${tf}, horário da corretora" style="display:block;width:100%;min-width:650px;height:auto">${grid}${ticks}${bodies}${marks}</svg>`;
 }
-function chart(){const bars=data?.state?.candles?.[tf]||[];const stale=bars.length&&(!data.state.candles_received_at||Date.now()-data.state.candles_received_at>30000);return card('Gráfico de candles',`<div class="row"><div class="tools">${['M1','M5','M15'].map(t=>`<button data-tf="${t}" class="${tf===t?'active':''}">${t}</button>`).join('')}</div><span class="pill gold">${bars.length?(stale?'Velas desatualizadas':bars.length+' velas recebidas'):'Aguardando dados'}</span></div><div class="chartbox" style="overflow-x:auto">${candleView()}</div><div class="legend"><span><i class="dot" style="background:#10d7a0"></i>Alta / compra</span><span><i class="dot" style="background:#ff4c64"></i>Baixa / venda</span><span><i class="dot" style="background:#f4bf48"></i>Saída / reversão</span></div><p class="sub">Horário da corretora. Velas atualizadas a cada 10 segundos com o monitor 1.20; a última vela pode estar em formação. Passe o cursor sobre uma vela ou marcador para ver os detalhes.</p>`);}
+function chart(){const bars=data?.state?.candles?.[tf]||[];const stale=bars.length&&(!data.state.candles_received_at||Date.now()-data.state.candles_received_at>30000);return card('Gráfico de candles',`<div class="row"><div class="tools">${['M1','M5','M15'].map(t=>`<button data-tf="${t}" class="${tf===t?'active':''}">${t}</button>`).join('')}</div><span class="pill gold">${bars.length?(stale?'Velas desatualizadas':bars.length+' velas recebidas'):'Aguardando dados'}</span></div><button class="btn" id="follow-candles" type="button" aria-pressed="true">Acompanhando última vela</button><div id="candle-scroll" class="chartbox" style="overflow-x:auto;overflow-anchor:none">${candleView()}</div><div class="legend"><span><b aria-hidden="true" style="color:#10d7a0">↑</b> Alta / compra</span><span><b aria-hidden="true" style="color:#ff4c64">↓</b> Baixa / venda</span><span><b aria-hidden="true" style="color:#f4bf48">→</b> Saída / reversão</span></div><p class="sub">Horário da corretora. Velas atualizadas a cada 10 segundos com o monitor 1.20; a última vela pode estar em formação. Passe o cursor sobre uma vela ou marcador para ver os detalhes.</p>`);}
 function bodyForPage(online){
  const s=data?.state,currency=esc(s?.currency||''),pending=empty(waiting);
  const status=online?'Recebendo dados':s?'Sem transmissão recente':waiting;
@@ -91,27 +92,46 @@ function bodyForPage(online){
  if(page==='users'&&identity?.role==='admin')return usersPage();
  return empty('Página indisponível.');
 }
+function bindChart(){
+ const box=document.getElementById('candle-scroll');
+ if(!box)return;
+ box.scrollLeft=followCandles?box.scrollWidth:chartScrollLeft;
+ const button=document.getElementById('follow-candles');
+ const label=()=>{if(button){button.textContent=followCandles?'Acompanhando última vela':'Voltar à última vela';button.setAttribute('aria-pressed',String(followCandles));}};
+ box.onscroll=()=>{chartScrollLeft=box.scrollLeft;followCandles=box.scrollWidth-box.clientWidth-box.scrollLeft<=12;label();};
+ if(button)button.onclick=()=>{followCandles=true;box.scrollLeft=box.scrollWidth;chartScrollLeft=box.scrollLeft;label();};
+ label();
+}
 function render(){
  if(!token||!identity||!data){login();return;}
  updateNav();if(!nav.some(n=>n[0]===page))page='home';
  const online=data.online&&!error&&Date.now()-data.received_at<30000;
+ lastCandleStale=!!data.state?.candles_received_at&&Date.now()-data.state.candles_received_at>30000;
  const message=error?esc(error):online?'Dados recebidos do MT5.':data.received_at?'Sem conexão recente. Exibindo o último recebimento.':waiting+'. Nenhuma operação recebida ainda.';
  root.innerHTML=`<div class="app"><aside class="side"><div class="brand"><img class="brand-logo" src="marca-tokai-invest.jpeg" alt="TOKAI INVEST"><div><b>TOKAI <em>INVEST</em></b><small>SINAIS DE TRADING</small></div></div><div class="navlabel">PAINEL</div><nav class="nav">${nav.map(([id,icon,t])=>`<button data-page="${id}" class="${page===id?'active':''}">${icon} &nbsp; ${t}</button>`).join('')}</nav><div class="side-note"><b>● ${online?'MT5 conectado':'Aguardando MT5'}</b><br>Sinais em teste · somente consulta.<br>Ative os alertas neste aparelho.</div><button class="btn" id="logout">Sair</button></aside><main class="main"><header class="top"><strong>${nav.find(n=>n[0]===page)[2]}</strong><div class="tools"><span class="badge">SINAIS · TESTE</span><button id="refresh">Atualizar</button><button id="header-logout">Sair</button></div></header><div class="content"><div class="alert" role="status">${message}</div>${window.tokaiPush?.html()||''}${bodyForPage(online)}</div></main></div><nav class="bottomnav">${nav.filter(n=>n[0]!=='connect').map(n=>{const id=n[0];return `<button data-page="${id}" class="${page===id?'active':''}"><span>${n[1]}</span>${n[2]}</button>`;}).join('')}</nav>`;
  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render();window.scrollTo(0,0);if(page==='users')loadUsers();});
- document.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{tf=b.dataset.tf;render();});
+ document.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{tf=b.dataset.tf;followCandles=true;chartScrollLeft=0;render();});
+ bindChart();
  document.getElementById('refresh').onclick=()=>page==='users'?loadUsers():refresh();
  if(page==='users')bindAdmin();
  window.tokaiPush?.bind(api,render);
  document.querySelectorAll('#logout,#header-logout').forEach(b=>b.onclick=logout);
 }
-async function refresh(){
+async function refresh(force=true){
  if(busy||!token)return;busy=true;const current=token;
+ let changed=force;
  try{
   if(!identity){const me=await api('/v1/me',undefined,current);if(current!==token)return;identity=me.user;updateNav();await window.tokaiPush?.restore(api).catch(()=>{});}
-  const result=await api('/v1/state',undefined,current);if(current!==token)return;data=result;error='';
+  const result=await api('/v1/state',undefined,current);if(current!==token)return;
+  const candleStale=d=>!!d?.state?.candles_received_at&&Date.now()-d.state.candles_received_at>30000;
+  changed=changed||!data||!!error||data.received_at!==result.received_at||data.online!==result.online||lastCandleStale!==candleStale(result);
+  data=result;error='';
  }catch(e){if(current!==token)return;if(e.status===401){clearAccess();error='Sessão encerrada ou acesso indisponível. Entre novamente.';}else error='Não foi possível atualizar. Os dados podem estar desatualizados.';}
- finally{busy=false;if(current===token||!token){if(page!=='users')render();}}
+ finally{busy=false;if(current===token||!token){if(page!=='users'&&(changed||error))render();}}
 }
-setInterval(()=>{if(!document.hidden)refresh();},1000);
+// One request at a time; hidden tabs stop polling. Offline/error retries stay at 1s.
+let nextRefreshAt=0;
+setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}},500);
 document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
 if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class="empty">Verificando acesso…</div>';refresh();}else login();
+
