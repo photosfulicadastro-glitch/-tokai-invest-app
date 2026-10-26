@@ -1,59 +1,37 @@
-# TOKAI INVEST — integração MT5 em preparação
+# TOKAI INVEST — teste privado de sinais MT5
 
-Esta branch substitui a demonstração por um painel privado de dados recebidos via API.
-**Ainda não publicada nem validada em um terminal MT5. Não é uma ativação concluída.**
+Painel de consulta para XAUUSD: Visão geral, Mercado, Operações e Histórico. Login individual por convite, com acesso administrativo separado. Consulte [ACCESS.md](ACCESS.md) para criar convites, bloquear acessos e recuperar senhas.
 
-## Implementado
-- Interface mantém CSS e logo; remove dados e gráfico simulados. Sem dados, mostra estado vazio.
-- Monitor MQL5 somente leitura, em gráfico separado do robô, envia snapshots a cada 5 segundos.
-- Posições com SL/TP, execuções individuais (entradas, saídas parciais e reversões), bid/ask e moeda real.
-- API Node 24 com SQLite persistente, chaves diferentes para envio e leitura, CORS restrito e validação.
-- Execuções identificadas por ticket textual, sem perda de precisão e sem duplicação no reenvio.
-- Estado offline após 30 segundos, mantendo os últimos dados.
-- Recuperação de execuções a partir do cursor persistido no terminal; carga inicial padrão de 30 dias.
+## Funcionamento
 
-## Ambiente gratuito de testes (atual)
+- Frontend estático no GitHub Pages; API Node 24 com PostgreSQL no Render gratuito.
+- Monitor `mt5/TokaiMonitor.mq5` 1.10 somente leitura: posições, SL/TP, execuções, bid/ask, moeda da conta e até 180 candles de cada período M1/M5/M15. Atualização a cada cinco segundos com MT5 conectado.
+- Histórico por ticket textual, com reenvio idempotente, recuperação via cursor local e carga inicial de 30 dias. Horários das velas/execuções são os da corretora; recebimento é exibido no horário do Japão.
+- Monitor acompanha todas as operações do símbolo configurado na conta, inclusive manuais. Não filtra Magic Number.
+- Último estado permanece visível como desatualizado quando o recebimento para. O painel consulta até 1.000 execuções; o banco conserva as demais.
+- Usuários têm acesso somente de leitura. Nenhuma ordem pode ser aberta ou fechada pelo aplicativo. Espelhamento e telas futuras estão reservados em `archive/future-pages.js.txt`, fora da aplicação carregada.
 
-Banco Render PostgreSQL 16 criado no espaço Fuli, região Singapore, plano free, com expiração em 25/11/2026. A API usa DATABASE_URL e pg; SQLite fica apenas para os testes locais. A criação do serviço web e a conexão ao banco ainda estão pendentes. O antigo Blueprint pago foi removido para impedir contratação acidental. Configuração via painel/MCP é a fonte de verdade.
+## Instalação do monitor
 
-Comandos do serviço gratuito: build `npm ci && npm test`; start `npm start`; Node 24; plano free; mesma região do banco. Configurar DATABASE_URL com a conexão interna, INGEST_TOKEN e VIEWER_TOKEN com chaves independentes, MT5_SOURCE=principal e APP_ORIGIN=https://photosfulicadastro-glitch.github.io. Nunca publicar os valores das chaves.
+No Windows do Parallels: MT5 → Arquivo → Abrir pasta de dados → MQL5 → Experts. Copie o MQ5, compile no MetaEditor e anexe a um gráfico separado do robô. Configure `ApiUrl`, `IngestToken`, `ExpectedAccount`, `Source=principal` e `GoldSymbol` com o símbolo exato. Autorize a URL HTTPS do servidor na lista de WebRequest. Não desative proteções de negociação nem troque a conta do robô para instalar o monitor.
 
-O serviço pode pausar após 15 minutos sem tráfego e demorar ao retomar. O banco gratuito expira em 30 dias; exportar dados antes da expiração. Nenhum plano pago ou cartão foi configurado por este trabalho. Os testes automatizados atuais cobrem a API com SQLite; a persistência PostgreSQL ainda exige validação no serviço.
+O Mac, Windows virtual e MT5 precisam permanecer em execução e conectados. Atualizações do monitor devem preservar os parâmetros. Não publique chaves nem capturas com segredos.
 
-## Referência de implantação anterior (SQLite local)
-Necessário um serviço HTTPS com Node 24 e volume persistente. GitHub Pages hospeda apenas a interface.
-1. Gerar duas chaves independentes: `openssl rand -hex 32` (uma para ingestão, outra para consulta).
-2. Configurar variáveis do `server/.env.example` no provedor. Nunca salvar chaves no repositório.
-3. Executar `node server/server.mjs`, ou construir a imagem em `server/` e montar volume em `/data`.
-4. Configurar HTTPS, backups do SQLite e limitação de requisições no proxy do provedor.
-5. Ajustar `config.js` com a URL pública HTTPS, sem chaves. Publicar a interface no GitHub Pages.
-6. Usar a chave VIEWER_TOKEN para acessar o painel privado. Ela fica apenas em memória e sai ao recarregar.
+## Servidor
 
-## Instalação no Mac com Parallels
-Dentro do **Windows do Parallels**, no MT5:
-1. Arquivo → Abrir pasta de dados → MQL5 → Experts; copiar `mt5/TokaiMonitor.mq5`.
-2. Abrir no MetaEditor e compilar. A compilação e execução precisam ser verificadas neste ambiente.
-3. Ferramentas → Opções → Expert Advisors: permitir WebRequest para a URL HTTPS do servidor.
-4. Abrir um gráfico separado do robô e anexar TokaiMonitor.
-5. Preencher ApiUrl (sem barra final), IngestToken, ExpectedAccount (login da conta), Source=principal e GoldSymbol com o nome exato da corretora (ex.: XAUUSD ou XAUUSD.s).
-6. Manter relógio do Windows sincronizado, MT5 conectado e Windows virtual em execução; evitar suspensão do Mac.
-7. Conferir aba Experts, API e painel. Não precisa enviar senha da corretora ao servidor.
+`npm ci && npm test` para construir e validar; `npm start` para iniciar. Variáveis: `DATABASE_URL`, `INGEST_TOKEN`, `VIEWER_TOKEN`, `MT5_SOURCE=principal`, `APP_ORIGIN=https://photosfulicadastro-glitch.github.io`. As chaves de ingestão e administração são diferentes. `config.js` contém somente a URL pública da API.
 
-O monitor acompanha todas as execuções do símbolo configurado nesta conta, incluindo as manuais. Não filtra por robô/Magic Number. Uma conta/símbolo por servidor nesta versão; para trocar a conta, usar banco e chaves novos.
+As tabelas de autenticação são adicionais às tabelas de operações. O monitor continua usando a mesma chave de ingestão. `VIEWER_TOKEN` é exclusivo do administrador; convidados não recebem essa chave. O banco de testes gratuito expira em 25/11/2026; os cadastros e sinais precisam de exportação/migração antes disso. O serviço gratuito pode suspender por inatividade e levar tempo para retomar. Não há contratação paga nesta implementação.
 
-## Validação
-`node --test tests/api.test.mjs`
-`node --check live.js`
+## Limites atuais
 
-Antes da operação real: compilar no MetaEditor, testar em conta de demonstração entrada, fechamento parcial, fechamento completo, SL/TP, reconexão, reinício e suspensão do Parallels. Não abrir ordens reais para teste automaticamente.
+- Notificações push com o aplicativo fechado, cadastro público, assinaturas, pagamentos e cópia de operações não estão implementados.
+- Sinais são exibidos enquanto o painel está aberto; a distribuição inicial é por convite a um grupo pequeno.
+- SL/TP são amostrados; alterações transitórias entre snapshots não são auditadas.
+- Execuções são individuais, incluindo fechamentos parciais, e não um relatório agregado de desempenho. Lançamentos separados de saldo/taxas não são incluídos.
+- Correções antigas de execuções fora da sobreposição do cursor exigem reimportação. Se o banco for recriado, restaurar backup ou limpar a variável global Tokai_ correspondente no terminal para reimportar o período configurado.
+- Compilação MQL5 e testes de operação devem ser verificados no terminal do usuário; não abrir ordens reais apenas para testar.
 
-## Limites e pendências explícitas
-- Notificações push com aplicativo fechado e cadastro/assinatura individual **ainda não implementados**. A chave de consulta é para validação privada pelo responsável, não para distribuição a assinantes.
-- Alterações de SL/TP aparecem no snapshot seguinte; alterações transitórias entre snapshots não têm trilha de auditoria.
-- História exibe execuções, não estatísticas de operações agregadas. Comissão, swap e taxas vinculadas ao deal são incluídos; lançamentos separados de saldo/taxas não entram.
-- Histórico do MT5 usa horário da corretora; a última recepção é exibida em Asia/Tokyo.
-- Os últimos 1.000 deals são consultados pelo painel; o banco conserva os demais. Cotações são o último tick recebido, que pode não ser recente fora da sessão de mercado.
-- O cursor avança apenas com resposta HTTP 200; execuções antigas alteradas pela corretora fora da sobreposição de 2 segundos requerem reimportação. Reinstalação do terminal sem cursor usa HistoryDays.
-- Se o servidor/banco for recriado, restaurar backup ou limpar a variável global Tokai_ correspondente no terminal para reimportar o período configurado.
-- Compilação MQL5, notificações e validação visual no navegador ainda pendentes. Nenhum envio real verificado.
-- Publicação exige acesso de escrita ao repositório e escolha/configuração da hospedagem.
+## Verificação
+
+`npm test` testa ingestão, autenticação, autorização, convites, recuperação, persistência, validade de candles e navegação. Os testes usam SQLite e o mesmo repositório SQL de autenticação utilizado com PostgreSQL. `node --check live.js` verifica a sintaxe do frontend.
