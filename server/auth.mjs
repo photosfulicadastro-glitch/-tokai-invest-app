@@ -47,7 +47,7 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
    }
    if(req.method==='POST'&&req.url==='/v1/admin/password'){
     throttle('admin-password',8,15*60000);const b=await readJson(req);
-    if(typeof b.password!=='string'||b.password.length<12||b.password.length>128)throw new HttpError(400,'Use uma frase-senha com 12 a 128 caracteres.');
+    if(typeof b.password!=='string'||b.password.length!==9)throw new HttpError(400,'Use uma senha administrativa com exatamente 9 caracteres.');
     if(!checkMaster(token)){
      const admin=await repo.adminPassword();
      if(typeof b.current!=='string'||b.current.length>128||!await expensive(()=>matches(b.current,admin?.password_hash)))throw new HttpError(401,'Senha atual inválida.');

@@ -40,12 +40,17 @@ test('senha administrativa, recuperação pela chave, sessões revogadas e exclu
  const base=`http://127.0.0.1:${server.address().port}`;
  const call=async(path,body,token='')=>{const r=await fetch(base+path,{method:body?'POST':'GET',headers:{'Content-Type':'application/json',Authorization:'Bearer '+token},body:body?JSON.stringify(body):undefined});return {status:r.status,body:await r.json()};};
  try{
-  assert.equal((await call('/v1/admin/password',{password:'frase segura inicial'},master)).status,200);
+  assert.equal((await call('/v1/admin/password',{password:'1234567'},master)).status,400);
+  assert.equal((await call('/v1/admin/password',{password:'Teste8!x'},master)).status,400);
+  assert.equal((await call('/v1/admin/password',{password:'1234567890'},master)).status,400);
+  assert.equal((await call('/v1/admin/password',{password:'Teste9!xy'},master)).status,200);
+  assert.equal((await call('/v1/auth/admin-login',{password:'Teste9!xy'})).status,200);
+  assert.equal((await call('/v1/admin/password',{password:'Inicio9!x'},master)).status,200);
   assert.equal((await call('/v1/auth/admin-login',{password:'errada'})).status,401);
-  const first=await call('/v1/auth/admin-login',{password:'frase segura inicial'});assert.equal(first.status,200);const token=first.body.token;assert.notEqual(token,master);
+  const first=await call('/v1/auth/admin-login',{password:'Inicio9!x'});assert.equal(first.status,200);const token=first.body.token;assert.notEqual(token,master);
   assert.equal((await call('/v1/admin/users',undefined,token)).status,200);
-  assert.equal((await call('/v1/admin/password',{password:'outra frase segura',current:'errada'},token)).status,401);
-  assert.equal((await call('/v1/admin/password',{password:'outra frase segura',current:'frase segura inicial'},token)).status,200);
+  assert.equal((await call('/v1/admin/password',{password:'Outra9!xy',current:'errada'},token)).status,401);
+  assert.equal((await call('/v1/admin/password',{password:'Outra9!xy',current:'Inicio9!x'},token)).status,200);
   assert.equal((await call('/v1/admin/users',undefined,token)).status,403);
   assert.equal((await call('/v1/auth/admin-login',{password:master})).status,200);
   const invite=await call('/v1/admin/invites',{name:'Disposable',username:'disposable'},master);

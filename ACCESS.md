@@ -31,4 +31,4 @@ As posições, cotações, candles e execuções são consultadas a cada um segu
 
 `npm test` cobre convites, uso único concorrente, senha incorreta, leitura, isolamento entre leitor/administrador/ingestão, persistência após reinício, bloqueio, logout, recuperação, expiração, limite de tentativas, CORS, navegação e escape de nomes. O PostgreSQL é a persistência de produção; os testes locais usam SQLite com o mesmo repositório SQL de autenticação.
 
-Em Acessos, você pode excluir usuários com confirmação e definir uma frase-senha administrativa com pelo menos 12 caracteres. Entre inicialmente com VIEWER_TOKEN; após salvar, use a nova senha. A chave original continua válida para recuperação. Nunca envie a chave administrativa aos leitores.
+Em Acessos, você pode excluir usuários com confirmação e definir uma frase-senha administrativa com exatamente 9 caracteres. Entre inicialmente com VIEWER_TOKEN; após salvar, use a nova senha. A chave original continua válida para recuperação. Nunca envie a chave administrativa aos leitores.
