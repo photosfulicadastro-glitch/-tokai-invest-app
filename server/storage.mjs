@@ -1,0 +1,15 @@
+import {DatabaseSync} from 'node:sqlite';
+export function sqliteStore(path){
+ const db=new DatabaseSync(path);db.exec('PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT,received INTEGER); CREATE TABLE IF NOT EXISTS deals(id TEXT PRIMARY KEY,body TEXT);');
+ return {async health(){db.prepare('SELECT 1').get();},async read(){const row=db.prepare('SELECT * FROM state WHERE id=1').get();return {row,deals:db.prepare('SELECT body FROM deals').all().map(x=>JSON.parse(x.body)).sort((a,b)=>b.time-a.time).slice(0,1000)};},async save(s,time){
+ db.exec('BEGIN IMMEDIATE');try{const row=db.prepare('SELECT body FROM state WHERE id=1').get();if(row&&JSON.parse(row.body).observed_at>s.observed_at){db.exec('ROLLBACK');return false;}
+ for(const d of s.deals)db.prepare('INSERT INTO deals VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body').run(d.id,JSON.stringify(d));
+ const {deals,...state}=s;db.prepare('INSERT INTO state VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,received=excluded.received').run(JSON.stringify(state),time);db.exec('COMMIT');return true;}catch(e){db.exec('ROLLBACK');throw e;}},async close(){db.close();}};
+}
+export async function postgresStore(url){
+ const {default:pg}=await import('pg');const pool=new pg.Pool({connectionString:url,max:3,connectionTimeoutMillis:10000,idleTimeoutMillis:30000});pool.on('error',()=>console.error('Conexão com banco interrompida'));
+ await pool.query('CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1),body JSONB,received BIGINT); CREATE TABLE IF NOT EXISTS deals(id TEXT PRIMARY KEY,body JSONB); CREATE INDEX IF NOT EXISTS deals_time ON deals (((body->>\'time\')::bigint) DESC);');
+ return {async health(){await pool.query('SELECT 1');},async read(){const c=await pool.connect();try{await c.query('BEGIN ISOLATION LEVEL REPEATABLE READ READ ONLY');const r=await c.query('SELECT * FROM state WHERE id=1');const d=await c.query("SELECT body FROM deals ORDER BY (body->>'time')::bigint DESC LIMIT 1000");await c.query('COMMIT');const row=r.rows[0];return {row:row?{...row,body:JSON.stringify(row.body),received:Number(row.received)}:null,deals:d.rows.map(x=>x.body)};}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}},async save(s,time){const c=await pool.connect();try{await c.query('BEGIN');await c.query('SELECT pg_advisory_xact_lock(829701)');const r=await c.query('SELECT body FROM state WHERE id=1');if(r.rows[0]?.body.observed_at>s.observed_at){await c.query('ROLLBACK');return false;}
+ for(const d of s.deals)await c.query('INSERT INTO deals VALUES($1,$2::jsonb) ON CONFLICT(id) DO UPDATE SET body=excluded.body',[d.id,JSON.stringify(d)]);
+ const {deals,...state}=s;await c.query('INSERT INTO state VALUES(1,$1::jsonb,$2) ON CONFLICT(id) DO UPDATE SET body=excluded.body,received=excluded.received',[JSON.stringify(state),time]);await c.query('COMMIT');return true;}catch(e){await c.query('ROLLBACK');throw e;}finally{c.release();}},async close(){await pool.end();}};
+}

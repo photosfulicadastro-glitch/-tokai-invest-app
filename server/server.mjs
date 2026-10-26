@@ -1,18 +1,18 @@
 import http from 'node:http';
-import {DatabaseSync} from 'node:sqlite';
+import {sqliteStore,postgresStore} from './storage.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
 const hash=s=>createHash('sha256').update(s).digest();
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
-export function createApi({dbPath='tokai.sqlite',ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
+export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
- const db=new DatabaseSync(dbPath);db.exec(`PRAGMA journal_mode=WAL; CREATE TABLE IF NOT EXISTS state(id INTEGER PRIMARY KEY CHECK(id=1),body TEXT,received INTEGER); CREATE TABLE IF NOT EXISTS deals(id TEXT PRIMARY KEY,body TEXT);`);
+ const db=storage||sqliteStore(dbPath);
  const server=http.createServer(async(req,res)=>{
   const headers={'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Vary':'Origin'};
   if(req.headers.origin===origin){headers['Access-Control-Allow-Origin']=origin;headers['Access-Control-Allow-Headers']='Authorization, Content-Type';headers['Access-Control-Allow-Methods']='GET, POST, OPTIONS';}
   const send=(status,data)=>{res.writeHead(status,headers);res.end(JSON.stringify(data));};
   if(req.headers.origin&&req.headers.origin!==origin)return send(403,{error:'Origem não permitida'});
   if(req.method==='OPTIONS')return send(204,{});
-  if(req.url==='/health'&&req.method==='GET')return send(200,{ok:true});
+  if(req.url==='/health'&&req.method==='GET'){try{await db.health();return send(200,{ok:true});}catch{return send(503,{ok:false});}}
   const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   const ingestion=req.url==='/v1/snapshot'&&req.method==='POST';
   if(!allowed(token,ingestion?ingestToken:viewerToken))return send(401,{error:'Acesso não autorizado'});
@@ -20,25 +20,18 @@ export function createApi({dbPath='tokai.sqlite',ingestToken,viewerToken,source=
    if(ingestion){
     let body='';for await(const chunk of req){body+=chunk;if(Buffer.byteLength(body)>2_000_000)return send(413,{error:'Carga muito grande'});}
     const s=JSON.parse(body);validate(s,source);
-    const prior=db.prepare('SELECT body FROM state WHERE id=1').get();
-    if(prior&&JSON.parse(prior.body).observed_at>s.observed_at)return send(409,{error:'Snapshot anterior ao estado atual'});
-    db.exec('BEGIN IMMEDIATE');try{
-     const insert=db.prepare('INSERT INTO deals(id,body) VALUES(?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body');
-     for(const d of s.deals)insert.run(d.id,JSON.stringify(d));
-     const {deals,...state}=s;
-     db.prepare('INSERT INTO state VALUES(1,?,?) ON CONFLICT(id) DO UPDATE SET body=excluded.body,received=excluded.received').run(JSON.stringify(state),now());db.exec('COMMIT');
-    }catch(e){db.exec('ROLLBACK');throw e;}
+    if(!await db.save(s,now()))return send(409,{error:'Snapshot anterior ao estado atual'});
     return send(200,{ok:true});
    }
    if(req.url==='/v1/state'&&req.method==='GET'){
-    const row=db.prepare('SELECT * FROM state WHERE id=1').get();
+    const {row,deals}=await db.read();
     const state=row?JSON.parse(row.body):null;
-    return send(200,{online:!!row&&now()-row.received<30_000&&now()-state.observed_at*1000<30_000,received_at:row?.received??null,state,deals:db.prepare('SELECT body FROM deals').all().map(x=>JSON.parse(x.body)).sort((a,b)=>b.time-a.time).slice(0,1000)});
+    return send(200,{online:!!row&&now()-row.received<30_000&&now()-state.observed_at*1000<30_000,received_at:row?.received??null,state,deals});
    }
    send(404,{error:'Rota não encontrada'});
   }catch(e){send(e instanceof SyntaxError||e.message==='Payload inválido'?400:500,{error:e.message==='Payload inválido'?'Payload inválido':'Não foi possível processar a solicitação'});}
  });
- server.on('close',()=>db.close());return server;
+ server.on('close',()=>{db.close().catch(()=>{});});return server;
 }
 function validate(s,source){
  const fail=()=>{throw Error('Payload inválido')};const num=x=>typeof x==='number'&&Number.isFinite(x);const id=x=>typeof x==='string'&&/^\d{1,20}$/.test(x);
@@ -49,6 +42,8 @@ function validate(s,source){
  if(new Set(s.positions.map(p=>p.id)).size!==s.positions.length)fail();
 }
 if(process.argv[1]&&import.meta.url===new URL(process.argv[1],'file:').href){
- const server=createApi({dbPath:process.env.DB_PATH||'tokai.sqlite',ingestToken:process.env.INGEST_TOKEN,viewerToken:process.env.VIEWER_TOKEN,source:process.env.MT5_SOURCE||'principal',origin:process.env.APP_ORIGIN});
+ if(!process.env.DATABASE_URL)throw Error('DATABASE_URL é obrigatória no servidor');
+ const storage=await postgresStore(process.env.DATABASE_URL);
+ const server=createApi({storage,dbPath:process.env.DB_PATH||'tokai.sqlite',ingestToken:process.env.INGEST_TOKEN,viewerToken:process.env.VIEWER_TOKEN,source:process.env.MT5_SOURCE||'principal',origin:process.env.APP_ORIGIN});
  server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('TOKAI API iniciada'));
 }

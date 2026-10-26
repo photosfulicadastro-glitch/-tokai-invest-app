@@ -12,7 +12,15 @@ Esta branch substitui a demonstração por um painel privado de dados recebidos 
 - Estado offline após 30 segundos, mantendo os últimos dados.
 - Recuperação de execuções a partir do cursor persistido no terminal; carga inicial padrão de 30 dias.
 
-## Implantação do servidor
+## Ambiente gratuito de testes (atual)
+
+Banco Render PostgreSQL 16 criado no espaço Fuli, região Singapore, plano free, com expiração em 25/11/2026. A API usa DATABASE_URL e pg; SQLite fica apenas para os testes locais. A criação do serviço web e a conexão ao banco ainda estão pendentes. O antigo Blueprint pago foi removido para impedir contratação acidental. Configuração via painel/MCP é a fonte de verdade.
+
+Comandos do serviço gratuito: build `npm ci && npm test`; start `npm start`; Node 24; plano free; mesma região do banco. Configurar DATABASE_URL com a conexão interna, INGEST_TOKEN e VIEWER_TOKEN com chaves independentes, MT5_SOURCE=principal e APP_ORIGIN=https://photosfulicadastro-glitch.github.io. Nunca publicar os valores das chaves.
+
+O serviço pode pausar após 15 minutos sem tráfego e demorar ao retomar. O banco gratuito expira em 30 dias; exportar dados antes da expiração. Nenhum plano pago ou cartão foi configurado por este trabalho. Os testes automatizados atuais cobrem a API com SQLite; a persistência PostgreSQL ainda exige validação no serviço.
+
+## Referência de implantação anterior (SQLite local)
 Necessário um serviço HTTPS com Node 24 e volume persistente. GitHub Pages hospeda apenas a interface.
 1. Gerar duas chaves independentes: `openssl rand -hex 32` (uma para ingestão, outra para consulta).
 2. Configurar variáveis do `server/.env.example` no provedor. Nunca salvar chaves no repositório.

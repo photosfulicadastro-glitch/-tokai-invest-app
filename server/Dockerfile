@@ -1,8 +1,8 @@
 FROM node:24-alpine
 WORKDIR /app
-COPY server.mjs .
-RUN mkdir /data && chown node:node /data
+COPY package*.json ./
+RUN npm ci --omit=dev --ignore-scripts
+COPY server ./server
 USER node
-ENV DB_PATH=/data/tokai.sqlite
 EXPOSE 8080
-CMD ["node", "server.mjs"]
+CMD ["node", "server/server.mjs"]
