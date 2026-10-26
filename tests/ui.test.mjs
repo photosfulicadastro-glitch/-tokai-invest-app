@@ -16,3 +16,10 @@ test('leitor vê somente quatro áreas; páginas administrativas e futuras ficam
  vm.runInContext("identity={role:'admin'};page='users';adminUsers=[{id:'1',display_name:'<img src=x onerror=alert(1)>',username:'test',status:'active'}];render();",context);
  assert(root.innerHTML.includes('Convidar usuário'));assert(!root.innerHTML.includes('<img src=x'));assert(root.innerHTML.includes('&lt;img'));
 });
+test('convite abre ativação sem substituir window.history',()=>{
+ const root={innerHTML:''},element={addEventListener(){}};let replaced=false;
+ const context=vm.createContext({document:{addEventListener(){},getElementById:id=>id==='root'?root:element},location:{hash:'#convite='+'A'.repeat(43),pathname:'/-tokai-invest-app/',search:''},sessionStorage:{getItem(){return '';},removeItem(){}},URL,URLSearchParams,setInterval(){},history:{replaceState(){replaced=true;}}});
+ vm.runInContext('window=this;',context);
+ vm.runInContext(readFileSync(new URL('../live.js',import.meta.url),'utf8'),context);
+ assert.equal(replaced,true);assert.match(root.innerHTML,/Ativar meu acesso/);assert.equal(vm.runInContext('typeof window.history.replaceState',context),'function');
+});

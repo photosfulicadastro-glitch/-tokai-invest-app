@@ -1,4 +1,5 @@
 import http from 'node:http';
+import {createPush} from './push.mjs';
 import {createAuth,HttpError,readJson} from './auth.mjs';
 import {sqliteStore,postgresStore} from './storage.mjs';
 import {createHash,timingSafeEqual} from 'node:crypto';
@@ -7,7 +8,10 @@ const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=
 export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
- const auth=createAuth(db.auth,now);
+ const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken));
+ const pushReady=createPush(db.push,{now});
+ const drain=()=>pushReady.then(p=>p.drain()).catch(()=>console.error('Entrega de notificações pendente'));
+ const pushTimer=setInterval(drain,2000);pushTimer.unref();
  const server=http.createServer(async(req,res)=>{
   const headers={'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Vary':'Origin'};
   if(req.headers.origin===origin){headers['Access-Control-Allow-Origin']=origin;headers['Access-Control-Allow-Headers']='Authorization, Content-Type';headers['Access-Control-Allow-Methods']='GET, POST, OPTIONS';}
@@ -18,15 +22,16 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   const ingestion=req.url==='/v1/snapshot'&&req.method==='POST';
   try{
-   const isAdmin=allowed(token,viewerToken);
+   const user=allowed(token,viewerToken)?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
+   const isAdmin=user?.role==='admin';
    if(await auth.route(req,send,isAdmin,token))return;
-   const user=isAdmin?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
    if(ingestion?!allowed(token,ingestToken):!user)return send(401,{error:'Acesso não autorizado'});
+   if(await (await pushReady).route(req,send,user))return;
    if(req.url==='/v1/me'&&req.method==='GET')return send(200,{user});
    if(ingestion){
     const s=await readJson(req,2_000_000);validate(s,source);
     if(!await db.save(s,now()))return send(409,{error:'Snapshot anterior ao estado atual'});
-    return send(200,{ok:true});
+    void drain();return send(200,{ok:true});
    }
    if(req.url==='/v1/state'&&req.method==='GET'){
     const {row,deals}=await db.read();
@@ -36,7 +41,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    send(404,{error:'Rota não encontrada'});
   }catch(e){if(e instanceof HttpError)return send(e.status,{error:e.message});send(e instanceof SyntaxError||e.message==='Payload inválido'?400:500,{error:e.message==='Payload inválido'?'Payload inválido':'Não foi possível processar a solicitação'});}
  });
- server.on('close',()=>{db.close().catch(()=>{});});return server;
+ server.on('close',()=>{clearInterval(pushTimer);db.close().catch(()=>{});});return server;
 }
 function validate(s,source){
  const fail=()=>{throw Error('Payload inválido')};const num=x=>typeof x==='number'&&Number.isFinite(x);const id=x=>typeof x==='string'&&/^\d{1,20}$/.test(x);
