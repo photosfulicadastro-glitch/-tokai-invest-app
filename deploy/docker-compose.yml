@@ -1,0 +1,56 @@
+services:
+  db:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: ..
+      dockerfile: server/Dockerfile
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: ${DATABASE_URL}
+      INGEST_TOKEN: ${INGEST_TOKEN}
+      VIEWER_TOKEN: ${VIEWER_TOKEN}
+      MT5_SOURCE: ${MT5_SOURCE:-principal}
+      APP_ORIGIN: https://${PUBLIC_DOMAIN}
+      PORT: 8080
+    depends_on:
+      db:
+        condition: service_healthy
+    expose:
+      - "8080"
+
+  web:
+    build:
+      context: ..
+      dockerfile: deploy/web/Dockerfile
+      args:
+        PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+    restart: unless-stopped
+    environment:
+      PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+    depends_on:
+      - api
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - caddy_data:/data
+      - caddy_config:/config
+
+volumes:
+  postgres_data:
+  caddy_data:
+  caddy_config:
