@@ -9,6 +9,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
  const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken));
+ const historyStart=Number(process.env.HISTORY_START_UNIX||0);
  const pushReady=createPush(db.push,{now});
  const drain=()=>pushReady.then(p=>p.drain()).catch(()=>console.error('Entrega de notificações pendente'));
  const pushTimer=setInterval(drain,2000);pushTimer.unref();
@@ -30,6 +31,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    if(req.url==='/v1/me'&&req.method==='GET')return send(200,{user});
    if(ingestion){
     const s=await readJson(req,2_000_000);validate(s,source);
+    if(historyStart>0)s.deals=s.deals.filter(d=>Number(d.time)>=historyStart);
     if(!await db.save(s,now()))return send(409,{error:'Snapshot anterior ao estado atual'});
     void drain();return send(200,{ok:true});
    }
