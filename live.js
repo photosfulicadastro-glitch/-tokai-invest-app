@@ -16,10 +16,13 @@ const side=s=>s==='BUY'?'COMPRA':'VENDA';
 const metric=(t,v,s)=>`<section class="card"><h3>${t}</h3><div class="metric">${v}</div><div class="sub">${s}</div></section>`;
 const empty=t=>`<div class="empty">${t}</div>`;
 async function api(path,body,access=token){
- const base=new URL(window.TOKAI_API_URL);
+ const configured=window.TOKAI_API_URL||'/api';
+ const base=new URL(configured,window.location.origin);
  if(base.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(base.hostname))throw Error('Servidor precisa usar HTTPS.');
  const headers={'Content-Type':'application/json'};if(access)headers.Authorization='Bearer '+access;
- const r=await fetch(base.href.replace(/\/$/,'')+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15000)});
+ let r;
+ try{r=await fetch(base.href.replace(/\/$/,'')+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15000)});}
+ catch{throw Error('Não foi possível conectar ao servidor. Atualize a página e tente novamente.');}
  const result=await r.json();if(!r.ok){const e=Error(result.error||'Não foi possível concluir.');e.status=r.status;throw e;}return result;
 }
 function remember(){try{if(identity?.role==='reader')sessionStorage.setItem('tokai.session',token);else sessionStorage.removeItem('tokai.session');}catch{}}
