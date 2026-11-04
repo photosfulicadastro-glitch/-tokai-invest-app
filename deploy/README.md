@@ -25,7 +25,7 @@ Com Docker e Docker Compose instalados, na raiz do repositório:
 ```sh
 cp .env.hostinger.example .env
 # edite .env com as chaves verdadeiras
-docker compose -f deploy/docker-compose.yml up -d --build
+docker compose --env-file .env -f deploy/docker-compose.yml up -d --build
 ```
 
 O Caddy emite e renova o certificado HTTPS. Libere somente as portas 80 e 443 no firewall público; não exponha a porta do PostgreSQL.
