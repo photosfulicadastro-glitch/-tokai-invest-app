@@ -1,0 +1,14 @@
+{$PUBLIC_DOMAIN} {
+    encode zstd gzip
+
+    handle_path /api/* {
+        reverse_proxy api:8080
+    }
+
+    root * /srv
+    try_files {path} /index.html
+    file_server
+
+    @assets path /app.js /config.js /live.js /notifications.js /styles.css /sw.js /manifest.webmanifest /icons/*
+    header @assets Cache-Control "public, max-age=3600"
+}
