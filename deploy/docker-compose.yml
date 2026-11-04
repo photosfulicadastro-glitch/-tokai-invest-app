@@ -25,6 +25,7 @@ services:
       VIEWER_TOKEN: ${VIEWER_TOKEN}
       MT5_SOURCE: ${MT5_SOURCE:-principal}
       APP_ORIGIN: https://${PUBLIC_DOMAIN}
+      HISTORY_START_UNIX: ${HISTORY_START_UNIX:-0}
       PORT: 8080
     depends_on:
       db:
