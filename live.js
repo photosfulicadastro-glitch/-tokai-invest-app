@@ -19,11 +19,15 @@ async function api(path,body,access=token){
  const configured=location.hostname==='sinais.tokaiinvest.jp'?'/api':(window.TOKAI_API_URL||'/api');
  const base=new URL(configured,window.location.origin);
  if(base.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(base.hostname))throw Error('Servidor precisa usar HTTPS.');
- const headers={'Content-Type':'application/json'};if(access)headers.Authorization='Bearer '+access;
- let r;
- try{r=await fetch(base.href.replace(/\/$/,'')+path,{method:body===undefined?'GET':'POST',headers,body:body===undefined?undefined:JSON.stringify(body),cache:'no-store',signal:AbortSignal.timeout(15000)});}
- catch{throw Error('Não foi possível conectar ao servidor. Atualize a página e tente novamente.');}
- const result=await r.json();if(!r.ok){const e=Error(result.error||'Não foi possível concluir.');e.status=r.status;throw e;}return result;
+ const url=base.href.replace(/\/$/,'')+path;
+ const result=await new Promise((resolve,reject)=>{
+  const req=new XMLHttpRequest();req.open(body===undefined?'GET':'POST',url,true);req.timeout=15000;req.setRequestHeader('Content-Type','application/json');if(access)req.setRequestHeader('Authorization','Bearer '+access);
+  req.onload=()=>{let payload={};try{payload=JSON.parse(req.responseText||'{}');}catch{reject(Error('Resposta inválida do servidor.'));return;}if(req.status<200||req.status>=300){const err=Error(payload.error||'Não foi possível concluir.');err.status=req.status;reject(err);return;}resolve(payload);};
+  req.onerror=()=>reject(Error('Não foi possível conectar ao servidor. Verifique sua conexão e tente novamente.'));
+  req.ontimeout=()=>reject(Error('O servidor demorou para responder. Tente novamente.'));
+  req.send(body===undefined?null:JSON.stringify(body));
+ });
+ return result;
 }
 function remember(){try{if(identity?.role==='reader')sessionStorage.setItem('tokai.session',token);else sessionStorage.removeItem('tokai.session');}catch{}}
 function clearAccess(){token='';identity=null;data=null;page='home';followCandles=true;chartScrollLeft=0;adminUsers=[];inviteResult=null;adminMessage='';remember();updateNav();}
