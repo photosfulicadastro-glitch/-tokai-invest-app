@@ -16,7 +16,7 @@ const side=s=>s==='BUY'?'COMPRA':'VENDA';
 const metric=(t,v,s)=>`<section class="card"><h3>${t}</h3><div class="metric">${v}</div><div class="sub">${s}</div></section>`;
 const empty=t=>`<div class="empty">${t}</div>`;
 async function api(path,body,access=token){
- const configured=window.TOKAI_API_URL||'/api';
+ const configured=location.hostname==='sinais.tokaiinvest.jp'?'/api':(window.TOKAI_API_URL||'/api');
  const base=new URL(configured,window.location.origin);
  if(base.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(base.hostname))throw Error('Servidor precisa usar HTTPS.');
  const headers={'Content-Type':'application/json'};if(access)headers.Authorization='Bearer '+access;
