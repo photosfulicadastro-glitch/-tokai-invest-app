@@ -150,6 +150,7 @@ function bindChart(){
  }
  label();
 }
+function arrangeLandscapeChartControls(){if(!chartExpanded||!window.matchMedia('(min-width:651px) and (max-width:1180px) and (orientation:landscape)').matches)return;const toolbar=document.querySelector('.chart-expanded .chart-toolbar'),controls=document.querySelector('.chart-expanded .chart-controls'),status=toolbar?.querySelector('.chart-status');if(toolbar&&controls&&status)toolbar.insertBefore(controls,status);}
 function render(){
  if(!token||!identity||!data){login();return;}
  updateNav();if(!nav.some(n=>n[0]===page))page='home';
@@ -158,6 +159,7 @@ function render(){
  const message=error?esc(error):online?'Dados recebidos do MT5.':data.received_at?'Sem conexão recente. Exibindo o último recebimento.':waiting+'. Nenhuma operação recebida ainda.';
   document.body.classList.toggle('chart-fullscreen',chartExpanded);
  root.innerHTML=`<div class="app"><aside class="side"><div class="brand"><img class="brand-logo" src="marca-tokai-invest.jpeg" alt="TOKAI INVEST"><div><b>TOKAI <em>INVEST</em></b><small>SINAIS DE TRADING</small></div></div><div class="navlabel">PAINEL</div><nav class="nav">${nav.map(([id,icon,t])=>`<button data-page="${id}" class="${page===id?'active':''}">${icon} &nbsp; ${t}</button>`).join('')}</nav><div class="side-note"><b>● ${online?'MT5 conectado':'Aguardando MT5'}</b><br>Sinais em teste · somente consulta.<br>Ative os alertas neste aparelho.</div><button class="btn" id="logout">Sair</button></aside><main class="main"><header class="top"><strong>${nav.find(n=>n[0]===page)[2]}</strong><div class="tools"><span class="badge">SINAIS · TESTE</span><button id="refresh">Atualizar</button><button id="header-logout">Sair</button></div></header><div class="content"><div class="alert" role="status">${message}</div>${window.tokaiPush?.html()||''}${bodyForPage(online)}</div></main></div><nav class="bottomnav">${nav.filter(n=>n[0]!=='connect').map(n=>{const id=n[0];return `<button data-page="${id}" class="${page===id?'active':''}"><span>${n[1]}</span>${n[2]}</button>`;}).join('')}</nav>`;
+ arrangeLandscapeChartControls();
  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render();window.scrollTo(0,0);if(page==='users')loadUsers();});
  document.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{tf=b.dataset.tf;followCandles=true;chartScrollLeft=0;chartYScale=1;chartYPan=0;render();});
  document.getElementById('zoom-in')?.addEventListener('click',()=>{chartZoom=Math.min(4,Number((chartZoom+.25).toFixed(2)));followCandles=true;render();});
@@ -184,7 +186,7 @@ async function refresh(force=true){
 // One request at a time; hidden tabs stop polling. Offline/error retries stay at 1s.
 let nextRefreshAt=0;
 setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}},500);
-document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});
+document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});let chartOrientationTimer;window.addEventListener('resize',()=>{if(chartExpanded){clearTimeout(chartOrientationTimer);chartOrientationTimer=setTimeout(render,80);}});
 if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class="empty">Verificando acesso…</div>';refresh();}else login();
 
 
