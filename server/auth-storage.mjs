@@ -1,5 +1,5 @@
 // Shared SQL works with PostgreSQL and SQLite; no plaintext credentials are stored.
-export const authSchema=\`
+export const authSchema=`
 CREATE TABLE IF NOT EXISTS admin_credentials(id INTEGER PRIMARY KEY,password_hash TEXT NOT NULL,version INTEGER NOT NULL);
 CREATE TABLE IF NOT EXISTS admin_sessions(token_hash TEXT PRIMARY KEY,version INTEGER NOT NULL,expires_at BIGINT NOT NULL);
 CREATE TABLE IF NOT EXISTS signal_users (
@@ -19,13 +19,12 @@ CREATE TABLE IF NOT EXISTS signal_memberships (
  access_until BIGINT,
  updated_at BIGINT NOT NULL
 );
+CREATE INDEX IF NOT EXISTS signal_memberships_expiry ON signal_memberships(access_until);
 CREATE INDEX IF NOT EXISTS signal_sessions_user ON signal_sessions(user_id);
 CREATE INDEX IF NOT EXISTS signal_sessions_expiry ON signal_sessions(expires_at);
-CREATE INDEX IF NOT EXISTS signal_memberships_expiry ON signal_memberships(access_until);
-\`;
+`;
 export function authRepository(query){
  const one=async(sql,args=[]) => (await query(sql,args)).rows[0];
- const accessible=(where='')=>\`NOT EXISTS (SELECT 1 FROM signal_memberships m WHERE m.user_id=u.id AND (m.status<>'active' OR (m.access_until IS NOT NULL AND m.access_until<=\$2)))\${where}\`;
  return {
   adminPassword:()=>one('SELECT * FROM admin_credentials WHERE id=1'),
   setAdminPassword:password=>query('INSERT INTO admin_credentials(id,password_hash,version) VALUES(1,$1,1) ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash,version=admin_credentials.version+1',[password]),
