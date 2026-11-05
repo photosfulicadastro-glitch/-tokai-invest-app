@@ -11,7 +11,7 @@ O convite vale 72 horas e é de uso único. O link só é mostrado na criação 
 
 ## Controle manual de mensalidade (em preparação)
 
-A primeira etapa usa dois planos: **Sinais** e **Premium**. Ao gerar um convite, o administrador seleciona o plano e a data “Acesso até”. A confirmação do pagamento continua externa e manual nesta etapa; o sistema apenas libera ou pausa o painel conforme a data e o status definidos.
+A primeira etapa usa somente o plano **Sinais**. Ao gerar um convite, o administrador informa a data “Acesso até”. A confirmação do pagamento continua externa e manual nesta etapa; o sistema apenas libera ou pausa o painel conforme a data e o status definidos. O plano **Premium** fica reservado para um futuro espelhamento de operações, após validações técnicas e jurídicas.
 
 - Pausar ou alterar a data encerra as sessões do aluno; ele precisa entrar novamente após uma renovação.
 - Alunos que já existiam antes desse recurso permanecem como **acesso legado**, sem data de vencimento, até que o administrador faça a primeira renovação manual.
