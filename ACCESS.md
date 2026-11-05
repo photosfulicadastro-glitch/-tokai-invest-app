@@ -9,6 +9,15 @@
 
 O convite vale 72 horas e é de uso único. O link só é mostrado na criação e não fica armazenado em texto no banco. Para reenviar, gere **Novo convite**. Essa ação também invalida a senha e as sessões anteriores. **Bloquear** impede novas consultas e revoga as sessões; **Liberar** exige um novo login. Um convite bloqueado precisa de um novo convite para ser ativado.
 
+## Controle manual de mensalidade (em preparação)
+
+A primeira etapa usa dois planos: **Sinais** e **Premium**. Ao gerar um convite, o administrador seleciona o plano e a data “Acesso até”. A confirmação do pagamento continua externa e manual nesta etapa; o sistema apenas libera ou pausa o painel conforme a data e o status definidos.
+
+- Pausar ou alterar a data encerra as sessões do aluno; ele precisa entrar novamente após uma renovação.
+- Alunos que já existiam antes desse recurso permanecem como **acesso legado**, sem data de vencimento, até que o administrador faça a primeira renovação manual.
+- Esta etapa não cria cobrança, não salva dados de cartão e não altera MT5, operações ou histórico.
+- A integração futura de pagamento automático deve usar o mesmo status e a mesma data de acesso, por confirmação autenticada do provedor.
+
 ## O que o usuário recebe
 
 Apenas Visão geral, Mercado, Operações e Histórico da conta principal, em modo de leitura. Nenhum usuário conecta sua própria conta MT5 ou envia ordens. Acesso à conexão MT5 e à gestão de usuários fica restrito ao administrador. Espelhamento, Minha conta, cadastro de sinais manuais e telas futuras foram retirados da navegação. O código reservado está em `archive/future-pages.js.txt` e no histórico Git, sem ser carregado pelo aplicativo.
