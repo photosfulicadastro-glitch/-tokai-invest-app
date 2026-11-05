@@ -4,6 +4,7 @@ const scrypt=promisify(scryptCallback);
 const digest=s=>createHash('sha256').update(s).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
 const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,role:'reader'});
+export const TERMS_VERSION='signals-risk-v1';
 export class HttpError extends Error {constructor(status,message){super(message);this.status=status;}}
 export async function readJson(req,limit=8192){
  let size=0;const chunks=[];
@@ -74,7 +75,9 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
     throttle('global-activate',30,60000);const b=await readJson(req);
     if(typeof b.invite!=='string'||!/^[-_A-Za-z0-9]{43}$/.test(b.invite))throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
     if(typeof b.password!=='string'||b.password.length!==9)throw new HttpError(400,'Use uma senha com exatamente 9 caracteres.');
-    const hash=digest(b.invite);if(!await repo.invite(hash))throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
+    if(b.terms_accepted!==true||b.terms_version!==TERMS_VERSION)throw new HttpError(400,'Leia e aceite o Termo de Ciência de Riscos para concluir o cadastro.');
+    const hash=digest(b.invite);const invited=await repo.invite(hash);if(!invited)throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
+    await repo.acceptTerms(invited.id,TERMS_VERSION,now());
     const password=await expensive(()=>passwordHash(b.password));const u=await repo.redeem(hash,password,now());
     if(!u)throw new HttpError(400,'Convite inválido, utilizado ou expirado.');send(200,await session(u));return true;
    }
