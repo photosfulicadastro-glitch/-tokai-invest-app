@@ -11,7 +11,7 @@ function app(){
  const XMLHttpRequest=class{open(){}setRequestHeader(){}send(){requestCount++;Promise.resolve().then(()=>requestHandler?requestHandler():{}).then(payload=>{this.status=200;this.responseText=JSON.stringify(payload);this.onload?.();}).catch(()=>this.onerror?.());}};
  const context=vm.createContext({document,XMLHttpRequest,window:{TOKAI_API_URL:'https://example.com',history:{replaceState(){}},scrollTo(){}},location:{hash:'',pathname:'/',search:''},sessionStorage:{getItem(){return ''},removeItem(){}},URL,URLSearchParams,Date,AbortSignal,setInterval(fn,ms){interval={fn,ms};}});
  vm.runInContext(readFileSync(new URL('../live.js',import.meta.url),'utf8'),context);
- vm.runInContext("token='test';identity={role:'reader'};data={state:null,deals:[],online:true,received_at:Date.now()};render();",context);
+ vm.runInContext("token='test';identity={role:'reader'};data={state:{symbol:'XAUUSD',currency:'JPY',candles:{M5:[{time:1000,open:2700,close:2701,low:2699,high:2702}]}},deals:[],online:true,received_at:Date.now()};render();",context);
  return {context,document,setResponse(fn){requestHandler=fn},get requestCount(){return requestCount},get box(){return box},get button(){return button},get renders(){return renders},get interval(){return interval}};
 }
 
