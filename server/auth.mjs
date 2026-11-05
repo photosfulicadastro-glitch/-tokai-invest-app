@@ -4,6 +4,7 @@ const scrypt=promisify(scryptCallback);
 const digest=s=>createHash('sha256').update(s).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
 const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,role:'reader'});
+export const TERMS_VERSION='signals-risk-v1';
 export class HttpError extends Error {constructor(status,message){super(message);this.status=status;}}
 export async function readJson(req,limit=8192){
  let size=0;const chunks=[];
@@ -20,6 +21,13 @@ async function matches(password,stored){
  const got=(await passwordHash(password,salt)).split('$')[2];
  return typeof stored==='string'&&timingSafeEqual(Buffer.from(got,'hex'),Buffer.from(expected,'hex'));
 }
+function accessUntil(value,fallback){
+ if(value===undefined)return fallback;
+ if(value===null||value==='')return null;
+ if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;
+ const time=Date.parse(value+'T14:59:59.999Z'); // fim do dia selecionado no horário do Japão
+ return Number.isSafeInteger(time)&&time>0?time:undefined;
+}
 export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
  const attempts=new Map();let inFlight=0,lastCleanup=0;
  function throttle(key,max,ms){
@@ -29,7 +37,7 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
   if(entry.count>max)throw new HttpError(429,'Muitas tentativas. Aguarde alguns minutos.');
  }
  async function expensive(fn){if(inFlight>=2)throw new HttpError(429,'Servidor ocupado. Tente novamente em instantes.');inFlight++;try{return await fn();}finally{inFlight--;}}
- async function session(user){const value=secret(),expires=now()+12*60*60*1000;if(!await repo.session(digest(value),user,expires))throw new HttpError(401,'Acesso indisponível. Entre novamente.');return {token:value,expires_at:expires,user:publicUser(user)};}
+ async function session(user){const value=secret(),expires=now()+12*60*60*1000;if(!await repo.session(digest(value),user,expires,now()))throw new HttpError(401,'Acesso indisponível. Entre novamente.');return {token:value,expires_at:expires,user:publicUser(user)};}
  return {
   async resolve(token){if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;if(await repo.resolveAdmin(digest(token),now()))return {role:'admin',name:'Administrador'};const user=await repo.resolve(digest(token),now());return user?publicUser(user):null;},
   async route(req,send,isAdmin,token){
@@ -67,7 +75,9 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
     throttle('global-activate',30,60000);const b=await readJson(req);
     if(typeof b.invite!=='string'||!/^[-_A-Za-z0-9]{43}$/.test(b.invite))throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
     if(typeof b.password!=='string'||b.password.length!==9)throw new HttpError(400,'Use uma senha com exatamente 9 caracteres.');
-    const hash=digest(b.invite);if(!await repo.invite(hash))throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
+    if(b.terms_accepted!==true||b.terms_version!==TERMS_VERSION)throw new HttpError(400,'Leia e aceite o Termo de Ciência de Riscos para concluir o cadastro.');
+    const hash=digest(b.invite);const invited=await repo.invite(hash);if(!invited)throw new HttpError(400,'Convite inválido, utilizado ou expirado.');
+    await repo.acceptTerms(invited.id,TERMS_VERSION,now());
     const password=await expensive(()=>passwordHash(b.password));const u=await repo.redeem(hash,password,now());
     if(!u)throw new HttpError(400,'Convite inválido, utilizado ou expirado.');send(200,await session(u));return true;
    }
@@ -78,9 +88,17 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
     const name=typeof b.name==='string'?b.name.trim():'';
     if(!/^[a-z0-9._-]{3,48}$/.test(username)||!name||name.length>80)throw new HttpError(400,'Informe nome (até 80 caracteres) e usuário (3 a 48 letras, números, ponto, hífen ou sublinhado).');
     const invite=secret(),expires=now()+72*3600000;
-    const result=await repo.create({id:randomUUID(),username,name,hash:digest(invite),expires,now:now()});
+    const plan=['signals','premium'].includes(b.plan)?b.plan:'signals';
+    const until=accessUntil(b.access_until,now()+30*24*3600000);if(until===undefined)throw new HttpError(400,'Informe uma data de acesso válida.');
+    const result=await repo.create({id:randomUUID(),username,name,hash:digest(invite),expires,now:now(),plan,accessUntil:until});
     if(!result)throw new HttpError(409,'Esse nome de usuário já está cadastrado.');
     send(201,{invite,expires_at:expires,username});return true;
+   }
+   if(req.method==='POST'&&req.url==='/v1/admin/memberships'){
+    const b=await readJson(req);const plan=['signals','premium'].includes(b.plan)?b.plan:null;const status=['active','paused'].includes(b.status)?b.status:null;
+    const until=accessUntil(b.access_until,undefined);if(typeof b.id!=='string'||!plan||!status||until===undefined)throw new HttpError(400,'Dados da mensalidade inválidos.');
+    const member=await repo.setMembership({id:b.id,plan,status,accessUntil:until,now:now()});if(!member)throw new HttpError(404,'Usuário não encontrado.');
+    send(200,{member});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/admin/access'){
     const b=await readJson(req);if(typeof b.id!=='string'||!['block','enable','reset','delete'].includes(b.action))throw new HttpError(400,'Ação inválida.');

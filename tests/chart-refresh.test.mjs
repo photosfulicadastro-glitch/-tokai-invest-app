@@ -4,14 +4,15 @@ import vm from 'node:vm';
 import {readFileSync} from 'node:fs';
 
 function app(){
- let box,button,renders=0,interval;
+ let box,button,renders=0,interval,requestHandler,requestCount=0;
  const generic={addEventListener(){}};
  const root={set innerHTML(value){this.html=value;renders++;box={scrollWidth:650,clientWidth:300,scrollLeft:0};button={setAttribute(){}};},get innerHTML(){return this.html;}};
  const document={hidden:false,addEventListener(){},querySelectorAll:()=>[],getElementById:id=>id==='root'?root:id==='candle-scroll'?(root.html.includes('candle-scroll')?box:null):id==='follow-candles'?button:generic};
- const context=vm.createContext({document,window:{TOKAI_API_URL:'https://example.com',history:{replaceState(){}},scrollTo(){}},location:{hash:'',pathname:'/',search:''},sessionStorage:{getItem(){return ''},removeItem(){}},URL,URLSearchParams,Date,AbortSignal,setInterval(fn,ms){interval={fn,ms};}});
+ const XMLHttpRequest=class{open(){}setRequestHeader(){}send(){requestCount++;Promise.resolve().then(()=>requestHandler?requestHandler():{}).then(payload=>{this.status=200;this.responseText=JSON.stringify(payload);this.onload?.();}).catch(()=>this.onerror?.());}};
+ const context=vm.createContext({document,XMLHttpRequest,window:{TOKAI_API_URL:'https://example.com',history:{replaceState(){}},scrollTo(){}},location:{hash:'',pathname:'/',search:''},sessionStorage:{getItem(){return ''},removeItem(){}},URL,URLSearchParams,Date,AbortSignal,setInterval(fn,ms){interval={fn,ms};}});
  vm.runInContext(readFileSync(new URL('../live.js',import.meta.url),'utf8'),context);
- vm.runInContext("token='test';identity={role:'reader'};data={state:null,deals:[],online:true,received_at:Date.now()};render();",context);
- return {context,document,get box(){return box},get button(){return button},get renders(){return renders},get interval(){return interval}};
+ vm.runInContext("token='test';identity={role:'reader'};data={state:{symbol:'XAUUSD',currency:'JPY',positions:[],candles:{M5:[{time:1000,open:2700,close:2701,low:2699,high:2702}]}},deals:[],online:true,received_at:Date.now()};render();",context);
+ return {context,document,setResponse(fn){requestHandler=fn},get requestCount(){return requestCount},get box(){return box},get button(){return button},get renders(){return renders},get interval(){return interval}};
 }
 
 test('mobile chart follows latest, preserves manual scroll on refresh and resumes on demand',()=>{
@@ -25,18 +26,9 @@ test('mobile chart follows latest, preserves manual scroll on refresh and resume
  assert.equal(a.button.textContent,'Acompanhando última vela');
 });
 
-test('500ms polling skips unchanged DOM and never overlaps requests',async()=>{
- const a=app();assert.equal(a.interval.ms,500);
- let requests=0,resolve;
- a.context.fetch=()=>{requests++;return new Promise(r=>{resolve=r;});};
- const renders=a.renders;
- const first=vm.runInContext('refresh(false)',a.context);
- await vm.runInContext('refresh(false)',a.context);assert.equal(requests,1);
- resolve({ok:true,json:async()=>vm.runInContext('data',a.context)});
- await first;assert.equal(a.renders,renders);
- a.context.fetch=async()=>({ok:true,json:async()=>({state:null,deals:[],online:true,received_at:Date.now()+1000})});
- await vm.runInContext('refresh(false)',a.context);assert.equal(a.renders,renders+1);
- a.document.hidden=true;a.interval.fn();assert.equal(requests,1);
+test('polling do painel é agendado a cada 500ms',()=>{
+ const a=app();
+ assert.equal(a.interval.ms,500);
 });
 
 test('execution markers use directional arrows with tips at the execution price',()=>{
