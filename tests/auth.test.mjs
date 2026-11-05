@@ -8,7 +8,7 @@ import {sqliteStore} from '../server/storage.mjs';
 
 test('convite individual, privilégios, sessão persistente, revogação e recuperação',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'tokai-auth-'));const path=join(dir,'auth.sqlite');
- let now=Date.now(),server,base,storage;const admin='a'.repeat(40),ingest='i'.repeat(40),password='Senha9!xy';
+ let now=Date.now(),server,base,storage;const admin='a'.repeat(40),ingest='i'.repeat(40),password='Senha9!xy',consent={terms_accepted:true,terms_version:'signals-risk-v1'};
  async function start(){storage=sqliteStore(path);server=createApi({storage,ingestToken:ingest,viewerToken:admin,now:()=>now});await new Promise(r=>server.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${server.address().port}`;}
  async function stop(){await new Promise(r=>server.close(r));}
  async function req(path,token='',body){const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});return {status:r.status,data:await r.json()};}
@@ -23,7 +23,8 @@ test('convite individual, privilégios, sessão persistente, revogação e recup
   assert.equal((await req('/v1/admin/invites',admin,{username:'maria.silva',name:'Outra'})).status,409);
   assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password:'12345678'})).status,400);
   assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password:'1234567890'})).status,400);
-  const active=await req('/v1/auth/activate','',{invite:invite.data.invite,password});
+  assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password,...consent})).status,400); // Termo obrigatório.
+  const active=await req('/v1/auth/activate','',{invite:invite.data.invite,password,...consent});
   assert.equal(active.status,200);assert.equal(active.data.user.role,'reader');const token=active.data.token;
   assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password})).status,400);
   assert.equal((await req('/v1/admin/users',token)).status,403);
@@ -46,16 +47,16 @@ test('convite individual, privilégios, sessão persistente, revogação e recup
   const reset=await req('/v1/admin/access',admin,{id:row.id,action:'reset'});assert.equal(reset.status,200);
   assert.equal((await req('/v1/state',again.data.token)).status,401);
   assert.equal((await req('/v1/auth/login','',{username:'maria.silva',password})).status,401);
-  const accepted=await req('/v1/auth/activate','',{invite:reset.data.invite,password:'Outra9!xy'});assert.equal(accepted.status,200);
+  const accepted=await req('/v1/auth/activate','',{invite:reset.data.invite,password:'Outra9!xy',...consent});assert.equal(accepted.status,200);
   now+=13*3600000;assert.equal((await req('/v1/state',accepted.data.token)).status,401);
   const expired=await req('/v1/admin/invites',admin,{username:'expired',name:'Expirado'});now+=73*3600000;
-  assert.equal((await req('/v1/auth/activate','',{invite:expired.data.invite,password})).status,400);
+  assert.equal((await req('/v1/auth/activate','',{invite:expired.data.invite,password,...consent})).status,400);
   const revoke=await req('/v1/admin/invites',admin,{username:'revoked',name:'Revogado'});
   const revokeUser=await storage.auth.find('revoked');
   assert.equal((await req('/v1/admin/access',admin,{id:revokeUser.id,action:'block'})).status,200);
-  assert.equal((await req('/v1/auth/activate','',{invite:revoke.data.invite,password})).status,400);
+  assert.equal((await req('/v1/auth/activate','',{invite:revoke.data.invite,password,...consent})).status,400);
   const race=await req('/v1/admin/invites',admin,{username:'race',name:'Race'});
-  const results=await Promise.all([req('/v1/auth/activate','',{invite:race.data.invite,password}),req('/v1/auth/activate','',{invite:race.data.invite,password})]);
+  const results=await Promise.all([req('/v1/auth/activate','',{invite:race.data.invite,password,...consent}),req('/v1/auth/activate','',{invite:race.data.invite,password,...consent})]);
   assert.deepEqual(results.map(x=>x.status).sort(),[200,400]);
   for(let i=0;i<8;i++)assert.equal((await req('/v1/auth/login','',{username:'unknown',password})).status,401);
   assert.equal((await req('/v1/auth/login','',{username:'unknown',password})).status,429);
