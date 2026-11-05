@@ -147,7 +147,7 @@ function bindChart(){
   window.addEventListener('pointermove',move);window.addEventListener('pointerup',stop);window.addEventListener('pointercancel',stop);
  };
  if(button)button.onclick=()=>{followCandles=true;box.scrollLeft=box.scrollWidth;chartScrollLeft=box.scrollLeft;label();};
- const axis=box.parentElement.querySelector('[data-price-axis]');
+ const axis=box.parentElement?.querySelector?.('[data-price-axis]');
  if(axis){
   axis.ondblclick=()=>{chartYScale=1;chartYPan=0;render();};
   axis.onpointerdown=e=>{
