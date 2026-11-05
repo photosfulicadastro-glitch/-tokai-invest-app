@@ -24,7 +24,7 @@ function accessUntil(value,fallback){
  if(value===undefined)return fallback;
  if(value===null||value==='')return null;
  if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;
- const time=Date.parse(value+'T23:59:59.999Z');
+ const time=Date.parse(value+'T14:59:59.999Z'); // fim do dia selecionado no horário do Japão
  return Number.isSafeInteger(time)&&time>0?time:undefined;
 }
 export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
