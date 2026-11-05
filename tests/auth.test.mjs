@@ -23,7 +23,7 @@ test('convite individual, privilégios, sessão persistente, revogação e recup
   assert.equal((await req('/v1/admin/invites',admin,{username:'maria.silva',name:'Outra'})).status,409);
   assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password:'12345678'})).status,400);
   assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password:'1234567890'})).status,400);
-  assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password,...consent})).status,400); // Termo obrigatório.
+  assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password})).status,400); // Termo obrigatório.
   const active=await req('/v1/auth/activate','',{invite:invite.data.invite,password,...consent});
   assert.equal(active.status,200);assert.equal(active.data.user.role,'reader');const token=active.data.token;
   assert.equal((await req('/v1/auth/activate','',{invite:invite.data.invite,password})).status,400);
