@@ -21,7 +21,10 @@ async function installerZip({license,agent,origin}){
   'ExpectedServer='+cleanSetValue(agent.broker_server),
   'GoldSymbol=XAUUSD',
   'LocalDailyLossPercent='+Number(agent.daily_loss_percent),
+  'VolumeMultiplier=1.0',
   'TokaiMagic=41277716',
+  'MaxSlippagePoints=30',
+  'MasterMaxAgeSeconds=30',
   ''
  ].join('\r\n');
  const readme=[
