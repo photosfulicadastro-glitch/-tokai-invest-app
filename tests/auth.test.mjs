@@ -39,7 +39,7 @@ test('convite individual, privilégios, sessão persistente, revogação e recup
   assert.equal((await req('/v1/state',token)).status,200);
   assert.equal((await req('/v1/me',token)).data.user.username,'maria.silva');
   const row=await storage.auth.find('maria.silva');assert(row.password_hash.startsWith('scrypt$'));assert(!row.password_hash.includes(password));assert.equal(row.invite_hash,null);
-  const list=(await req('/v1/admin/users',admin)).data.users;assert.equal(list.length,1);assert(!JSON.stringify(list).includes('password_hash'));assert(!JSON.stringify(list).includes(token));
+  const list=(await req('/v1/admin/users',admin)).data.users;assert.equal(list.filter(x=>x.username==='maria.silva').length,1);assert.equal(list.filter(x=>x.username==='aluno.copy').length,1);assert(!JSON.stringify(list).includes('password_hash'));assert(!JSON.stringify(list).includes(token));
   assert.equal((await req('/v1/auth/login','',{username:'maria.silva',password:'incorrect'})).status,401);
   await stop();await start();assert.equal((await req('/v1/state',token)).status,200);
   assert.equal((await req('/v1/admin/access',admin,{id:row.id,action:'block'})).status,200);
