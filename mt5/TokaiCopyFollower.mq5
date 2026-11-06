@@ -1,5 +1,5 @@
 #property strict
-#property version "1.20"
+#property version "1.21"
 // TOKAI COPY FOLLOWER
 // A conta da corretora permanece local no MT5. A licença é vinculada a uma única conta e instalação.
 // V1: XAUUSD em contas MT5 com modo hedging. A API deve estar liberada em Ferramentas > Opções > Expert Advisors.
@@ -15,6 +15,7 @@ input double VolumeMultiplier=1.0;
 input long TokaiMagic=41277716;
 input int MaxSlippagePoints=30;
 input int MasterMaxAgeSeconds=30;
+input int PollSeconds=1; // Consulta a conta-mãe a cada 1 segundo (mínimo 1, máximo 5).
 
 struct MasterPosition{
  string id;
