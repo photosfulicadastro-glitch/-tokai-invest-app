@@ -25,6 +25,7 @@ async function installerZip({license,agent,origin}){
   'TokaiMagic=41277716',
   'MaxSlippagePoints=30',
   'MasterMaxAgeSeconds=30',
+  'PollSeconds=1',
   ''
  ].join('\r\n');
  const readme=[
@@ -35,11 +36,12 @@ async function installerZip({license,agent,origin}){
   '',
   'INSTALAÇÃO',
   '1. No MetaTrader 5, abra Arquivo > Abrir Pasta de Dados > MQL5 > Experts.',
-  '2. Copie TokaiCopyFollower.mq5 para a pasta Experts e compile-o no MetaEditor para gerar o arquivo .ex5.',
+  '2. Copie TokaiCopyFollower.ex5 para a pasta Experts. Se o pacote trouxer somente o arquivo .mq5, abra-o no MetaEditor e compile para gerar o .ex5.',
   '3. Anexe o EA compilado a um gráfico do XAUUSD da conta vinculada.',
   '4. Em Ferramentas > Opções > Expert Advisors, adicione https://sinais.tokaiinvest.jp à lista de WebRequest permitido.',
   '5. Na aba Inputs do EA, use Carregar e selecione TokaiCopyFollower.set deste pacote.',
   '6. Ative Permitir negociação algorítmica quando o modo global do Copy autorizar esta conta.',
+  '7. A configuração padrão consulta a conta-mãe a cada 1 segundo.',
   '',
   'A senha da corretora nunca é solicitada nem enviada pela Tokai.',
   'Este EA exige conta MT5 em modo hedging; contas netting não são compatíveis.',
