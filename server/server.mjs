@@ -3,7 +3,48 @@ import {createPush} from './push.mjs';
 import {createAuth,HttpError,readJson} from './auth.mjs';
 import {sqliteStore,postgresStore} from './storage.mjs';
 import {createHash,timingSafeEqual,randomBytes,randomUUID} from 'node:crypto';
+import {readFile} from 'node:fs/promises';
 const hash=s=>createHash('sha256').update(s).digest();
+const u16=n=>{const b=Buffer.alloc(2);b.writeUInt16LE(n&0xffff);return b;};
+const u32=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n>>>0);return b;};
+const crc32=data=>{let crc=0xffffffff;for(const byte of data){crc^=byte;for(let bit=0;bit<8;bit++)crc=(crc>>>1)^((crc&1)?0xedb88320:0);}return(crc^0xffffffff)>>>0;};
+// Arquivo ZIP sem compressão para não depender de bibliotecas externas no servidor.
+const zip=entries=>{let offset=0;const local=[],central=[];for(const entry of entries){const name=Buffer.from(entry.name,'utf8'),body=Buffer.isBuffer(entry.body)?entry.body:Buffer.from(entry.body,'utf8'),sum=crc32(body);const part=Buffer.concat([Buffer.from([0x50,0x4b,0x03,0x04]),u16(20),u16(0x800),u16(0),u16(0),u16(0),u32(sum),u32(body.length),u32(body.length),u16(name.length),u16(0),name,body]);local.push(part);central.push(Buffer.concat([Buffer.from([0x50,0x4b,0x01,0x02]),u16(20),u16(20),u16(0x800),u16(0),u16(0),u16(0),u32(sum),u32(body.length),u32(body.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]));offset+=part.length;}const directory=Buffer.concat(central),end=Buffer.concat([Buffer.from([0x50,0x4b,0x05,0x06]),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(directory.length),u32(offset),u16(0)]);return Buffer.concat([...local,directory,end]);};
+const cleanSetValue=value=>String(value??'').replace(/[\r\n]/g,'').trim();
+async function installerZip({license,agent,origin}){
+ const apiUrl=cleanSetValue(origin).replace(/\/$/,'')+'/api';
+ const settings=[
+  '; TOKAI COPY — configuração individual. Não compartilhe este arquivo.',
+  'ApiUrl='+apiUrl,
+  'License='+cleanSetValue(license),
+  'ExpectedAccount='+cleanSetValue(agent.expected_account),
+  'ExpectedServer='+cleanSetValue(agent.broker_server),
+  'GoldSymbol=XAUUSD',
+  'LocalDailyLossPercent='+Number(agent.daily_loss_percent),
+  'TokaiMagic=41277716',
+  ''
+ ].join('\r\n');
+ const readme=[
+  'TOKAI COPY — INSTALADOR INDIVIDUAL',
+  '',
+  'Esta instalação é vinculada à conta MT5 '+cleanSetValue(agent.expected_account)+' no servidor '+cleanSetValue(agent.broker_server)+'.',
+  'A licença é única e é ativada na primeira instalação válida. Não copie ou compartilhe este pacote.',
+  '',
+  'INSTALAÇÃO',
+  '1. No MetaTrader 5, abra Arquivo > Abrir Pasta de Dados > MQL5 > Experts.',
+  '2. Copie TokaiCopyFollower.mq5 para a pasta Experts e compile-o no MetaEditor para gerar o arquivo .ex5.',
+  '3. Anexe o EA compilado a um gráfico do XAUUSD da conta vinculada.',
+  '4. Em Ferramentas > Opções > Expert Advisors, adicione https://sinais.tokaiinvest.jp à lista de WebRequest permitido.',
+  '5. Na aba Inputs do EA, use Carregar e selecione TokaiCopyFollower.set deste pacote.',
+  '6. Ative Permitir negociação algorítmica somente quando a Tokai autorizar a etapa de homologação.',
+  '',
+  'A senha da corretora nunca é solicitada nem enviada pela Tokai.',
+  'O limite diário é aplicado pelo servidor e pelo EA; ele pausa somente novas entradas copiadas.',
+  ''
+ ].join('\r\n');
+ const ea=await readFile(new URL('../mt5/TokaiCopyFollower.mq5',import.meta.url),'utf8');
+ return zip([{name:'TokaiCopyFollower.mq5',body:ea},{name:'TokaiCopyFollower.set',body:settings},{name:'LEIA-ME.txt',body:readme}]);
+}
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
 export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
@@ -17,6 +58,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   const headers={'Content-Type':'application/json','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','Vary':'Origin'};
   if(req.headers.origin===origin){headers['Access-Control-Allow-Origin']=origin;headers['Access-Control-Allow-Headers']='Authorization, Content-Type';headers['Access-Control-Allow-Methods']='GET, POST, OPTIONS';}
   const send=(status,data)=>{res.writeHead(status,headers);res.end(JSON.stringify(data));};
+  const sendZip=(filename,body)=>{res.writeHead(200,{...headers,'Content-Type':'application/zip','Content-Disposition':'attachment; filename="'+filename+'"','Content-Length':String(body.length)});res.end(body);};
   if(req.headers.origin&&req.headers.origin!==origin)return send(403,{error:'Origem não permitida'});
   if(req.method==='OPTIONS')return send(204,{});
   if(req.url==='/health'&&req.method==='GET'){try{await db.health();return send(200,{ok:true});}catch{return send(503,{ok:false});}}
@@ -30,6 +72,17 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const [settings,users]=await Promise.all([db.copy.settings(),db.auth.list()]);
     const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id)})));
     return send(200,{settings,agents});
+   }
+   if(req.url==='/v1/admin/copy/installers'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req);if(typeof b.agent_id!=='string')return send(400,{error:'Agente inválido.'});
+    const agent=await db.copy.agentById(b.agent_id);if(!agent)return send(404,{error:'Agente não encontrado.'});
+    await db.copy.revokeLicenses({agentId:agent.id,now:now()});
+    const license=randomBytes(32).toString('base64url');
+    const issued=await db.copy.issueLicense({id:randomUUID(),agentId:agent.id,licenseHash:createHash('sha256').update(license).digest('hex'),now:now()});
+    await db.copy.markLicenseDownloaded({id:issued.id,now:now()});
+    const bundle=await installerZip({license,agent,origin});
+    return sendZip('tokai-copy-'+agent.expected_account+'.zip',bundle);
    }
    if(req.url==='/v1/admin/copy/licenses/revoke'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
