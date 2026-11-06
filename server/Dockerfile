@@ -3,6 +3,7 @@ WORKDIR /app
 COPY package*.json ./
 RUN npm ci --omit=dev --ignore-scripts
 COPY server ./server
+COPY mt5 ./mt5
 USER node
 EXPOSE 8080
 CMD ["node", "server/server.mjs"]
