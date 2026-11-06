@@ -55,7 +55,8 @@ const copyAccessUntil=value=>{if(value===null||value==='')return null;if(typeof 
 export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
- const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken));
+ const syncPlan=async({userId,plan,status,accessUntil,now:time})=>await db.copy.setCopyMembership({userId,status:(plan==='copy'||plan==='signals_copy')&&status==='active'?'active':'paused',accessUntil,now:time});
+ const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken),syncPlan);
  const historyStart=Number(process.env.HISTORY_START_UNIX||0);
  const pushReady=createPush(db.push,{now});
  const drain=()=>pushReady.then(p=>p.drain()).catch(()=>console.error('Entrega de notificações pendente'));
