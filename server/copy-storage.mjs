@@ -36,6 +36,18 @@ CREATE TABLE IF NOT EXISTS copy_licenses (
  last_seen_at BIGINT
 );
 CREATE INDEX IF NOT EXISTS copy_licenses_agent ON copy_licenses(agent_id);
+CREATE TABLE IF NOT EXISTS copy_agent_events (
+ id TEXT PRIMARY KEY,
+ agent_id TEXT NOT NULL REFERENCES copy_agents(id),
+ license_id TEXT NOT NULL REFERENCES copy_licenses(id),
+ event_type TEXT NOT NULL,
+ master_position_id TEXT,
+ copied_ticket TEXT,
+ message TEXT NOT NULL,
+ created_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS copy_agent_events_recent ON copy_agent_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS copy_agent_events_agent ON copy_agent_events(agent_id,created_at DESC);
 `;
 export function copyRepository(query){
  const one=async(sql,args=[])=>(await query(sql,args)).rows[0]||null;
@@ -52,6 +64,8 @@ export function copyRepository(query){
   license:hash=>one('SELECT l.*,a.expected_account,a.broker_server,a.status AS agent_status,a.daily_loss_percent FROM copy_licenses l JOIN copy_agents a ON a.id=l.agent_id WHERE l.license_hash=$1',[hash]),
   activateLicense:({id,fingerprint,now})=>one("UPDATE copy_licenses SET status='active',activated_at=$1,terminal_fingerprint=$2,last_seen_at=$1 WHERE id=$3 AND status='issued' RETURNING id,status,activated_at",[now,fingerprint,id]),
   revokeLicenses:async({agentId,now})=>{await query("UPDATE copy_licenses SET status='revoked',revoked_at=$1 WHERE agent_id=$2 AND status IN ('issued','active')",[now,agentId]);return true;},
-  heartbeat:({id,status,equity,error,now})=>one('UPDATE copy_agents SET status=$1,last_equity=$2,last_error=$3,last_seen_at=$4,updated_at=$4 WHERE id=$5 RETURNING id',[status,equity,error,now,id])
+  heartbeat:({id,status,equity,error,now})=>one('UPDATE copy_agents SET status=$1,last_equity=$2,last_error=$3,last_seen_at=$4,updated_at=$4 WHERE id=$5 RETURNING id',[status,equity,error,now,id]),
+  recordEvent:e=>one('INSERT INTO copy_agent_events(id,agent_id,license_id,event_type,master_position_id,copied_ticket,message,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,agent_id,event_type,master_position_id,copied_ticket,message,created_at',[e.id,e.agentId,e.licenseId,e.eventType,e.masterPositionId||null,e.copiedTicket||null,e.message,e.now]),
+  recentEvents:async(limit=80)=>(await query('SELECT id,agent_id,event_type,master_position_id,copied_ticket,message,created_at FROM copy_agent_events ORDER BY created_at DESC LIMIT $1',[limit])).rows
  };
 }
