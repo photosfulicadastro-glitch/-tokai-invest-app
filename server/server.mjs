@@ -25,26 +25,6 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   try{
    const user=allowed(token,viewerToken)?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
    const isAdmin=user?.role==='admin';
-   if(req.url==='/v1/copy/plan'&&req.method==='POST'){
-    const b=await readJson(req);const license=typeof b.license==='string'?b.license:'';const account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||''),equity=Number(b.equity);
-    if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200||!Number.isFinite(equity)||equity<=0)return send(400,{error:'Dados do agente inválidos.'});
-    const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
-    if(!entry||entry.status!=='active'||entry.expected_account!==account||entry.broker_server!==serverName||entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Agente não autorizado.'});
-    const settings=await db.copy.settings();const {row}=await db.read();const master=row?JSON.parse(row.body):null;
-    await db.copy.heartbeat({id:entry.agent_id,status:'connected',equity,error:null,now:now()});
-    return send(200,{execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD',master:master?{observed_at:master.observed_at,symbol:master.symbol,positions:master.positions}:null});
-   }
-   if(req.url==='/v1/copy/activate'&&req.method==='POST'){
-    const b=await readJson(req);const license=typeof b.license==='string'?b.license:'';const account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||'');
-    if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200)return send(400,{error:'Dados de ativação inválidos.'});
-    const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
-    if(!entry||entry.status==='revoked'||entry.expected_account!==account||entry.broker_server!==serverName)return send(403,{error:'Licença não autorizada para esta conta.'});
-    if(entry.status==='active'&&entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Licença já ativada em outra instalação.'});
-    if(entry.status==='issued')await db.copy.activateLicense({id:entry.id,fingerprint,now:now()});
-    const settings=await db.copy.settings();
-    return send(200,{ok:true,execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD'});
-   }
-   if(await auth.route(req,send,isAdmin,token))return;
    if(req.url==='/v1/admin/copy/overview'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const [settings,users]=await Promise.all([db.copy.settings(),db.auth.list()]);
@@ -78,6 +58,27 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!agent)return send(409,{error:'Este aluno já possui agente Copy configurado.'});
     return send(201,{agent,token:agentToken});
    }
+   
+   if(req.url==='/v1/copy/plan'&&req.method==='POST'){
+    const b=await readJson(req);const license=typeof b.license==='string'?b.license:'';const account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||''),equity=Number(b.equity);
+    if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200||!Number.isFinite(equity)||equity<=0)return send(400,{error:'Dados do agente inválidos.'});
+    const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
+    if(!entry||entry.status!=='active'||entry.expected_account!==account||entry.broker_server!==serverName||entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Agente não autorizado.'});
+    const settings=await db.copy.settings();const {row}=await db.read();const master=row?JSON.parse(row.body):null;
+    await db.copy.heartbeat({id:entry.agent_id,status:'connected',equity,error:null,now:now()});
+    return send(200,{execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD',master:master?{observed_at:master.observed_at,symbol:master.symbol,positions:master.positions}:null});
+   }
+   if(req.url==='/v1/copy/activate'&&req.method==='POST'){
+    const b=await readJson(req);const license=typeof b.license==='string'?b.license:'';const account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||'');
+    if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200)return send(400,{error:'Dados de ativação inválidos.'});
+    const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
+    if(!entry||entry.status==='revoked'||entry.expected_account!==account||entry.broker_server!==serverName)return send(403,{error:'Licença não autorizada para esta conta.'});
+    if(entry.status==='active'&&entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Licença já ativada em outra instalação.'});
+    if(entry.status==='issued')await db.copy.activateLicense({id:entry.id,fingerprint,now:now()});
+    const settings=await db.copy.settings();
+    return send(200,{ok:true,execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD'});
+   }
+   if(await auth.route(req,send,isAdmin,token))return;
    if(ingestion?!allowed(token,ingestToken):!user)return send(401,{error:'Acesso não autorizado'});
    if(await (await pushReady).route(req,send,user))return;
    if(req.url==='/v1/me'&&req.method==='GET')return send(200,{user});
