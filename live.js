@@ -205,7 +205,7 @@ function render(){
  document.getElementById('zoom-out')?.addEventListener('click',()=>{chartZoom=Math.max(1,Number((chartZoom-.25).toFixed(2)));followCandles=true;render();});
   ['toggle-chart-expanded','toggle-chart-expanded-mobile'].forEach(id=>document.getElementById(id)?.addEventListener('click',()=>{chartExpanded=!chartExpanded;render();}));
  bindChart();
- document.getElementById('refresh').onclick=()=>page==='users'?loadUsers():refresh();
+ document.getElementById('refresh').onclick=()=>page==='users'?loadUsers():page==='copy'?loadCopy():refresh();
  if(page==='users')bindAdmin();
  window.tokaiPush?.bind(api,render);
  document.querySelectorAll('#logout,#header-logout').forEach(b=>b.onclick=logout);
@@ -220,7 +220,7 @@ async function refresh(force=true){
   changed=changed||!data||!!error||data.received_at!==result.received_at||data.online!==result.online||lastCandleStale!==candleStale(result);
   data=result;error='';
  }catch(e){if(current!==token)return;if(e.status===401){clearAccess();error='Sessão encerrada ou acesso indisponível. Entre novamente.';}else error='Não foi possível atualizar. Os dados podem estar desatualizados.';}
- finally{busy=false;if(current===token||!token){if(page!=='users'&&(changed||error))render();}}
+ finally{busy=false;if(current===token||!token){if(page!=='users'&&page!=='copy'&&(changed||error))render();}}
 }
 // One request at a time; hidden tabs stop polling. Offline/error retries stay at 1s.
 let nextRefreshAt=0;
