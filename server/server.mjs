@@ -73,9 +73,9 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    const isAdmin=user?.role==='admin';
    if(req.url==='/v1/admin/copy/overview'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
-    const [settings,users]=await Promise.all([db.copy.settings(),db.auth.list()]);
+    const [settings,users,events]=await Promise.all([db.copy.settings(),db.auth.list(),db.copy.recentEvents(80)]);
     const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id)})));
-    return send(200,{settings,agents});
+    return send(200,{settings,agents,events});
    }
    if(req.url==='/v1/admin/copy/installers'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
@@ -124,6 +124,16 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const settings=await db.copy.settings();const {row}=await db.read();const master=row?JSON.parse(row.body):null;
     await db.copy.heartbeat({id:entry.agent_id,status:'connected',equity,error:null,now:now()});
     return send(200,{execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD',master:master?{observed_at:master.observed_at,symbol:master.symbol,positions:master.positions}:null});
+   }
+   if(req.url==='/v1/copy/report'&&req.method==='POST'){
+    const b=await readJson(req),license=typeof b.license==='string'?b.license:'',account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||''),equity=Number(b.equity),eventType=String(b.event_type||''),message=typeof b.message==='string'?b.message.trim():'',masterPositionId=b.master_position_id===undefined||b.master_position_id===''?null:String(b.master_position_id),copiedTicket=b.copied_ticket===undefined||b.copied_ticket===''?null:String(b.copied_ticket);
+    if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200||!Number.isFinite(equity)||equity<=0||!['activated','status','opened','modified','reduced','closed','blocked','error'].includes(eventType)||message.length<1||message.length>280||(masterPositionId!==null&&!/^[0-9]{1,20}$/.test(masterPositionId))||(copiedTicket!==null&&!/^[0-9]{1,20}$/.test(copiedTicket)))return send(400,{error:'Relatório de agente inválido.'});
+    const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
+    if(!entry||entry.status!=='active'||entry.expected_account!==account||entry.broker_server!==serverName||entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Agente não autorizado.'});
+    const time=now(),status=eventType==='error'?'error':eventType==='blocked'?'blocked':'connected';
+    await db.copy.recordEvent({id:randomUUID(),agentId:entry.agent_id,licenseId:entry.id,eventType,masterPositionId,copiedTicket,message,now:time});
+    await db.copy.heartbeat({id:entry.agent_id,status,equity,error:eventType==='error'?message:null,now:time});
+    return send(200,{ok:true});
    }
    if(req.url==='/v1/copy/activate'&&req.method==='POST'){
     const b=await readJson(req);const license=typeof b.license==='string'?b.license:'';const account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||'');
