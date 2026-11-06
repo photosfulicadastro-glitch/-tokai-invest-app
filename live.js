@@ -33,6 +33,19 @@ async function api(path,body,access=token){
  });
  return result;
 }
+async function downloadCopyInstaller(agentId){
+ const configured=location.hostname==='sinais.tokaiinvest.jp'?'/api':(window.TOKAI_API_URL||'/api');
+ const base=new URL(configured,window.location.origin);
+ if(base.protocol!=='https:'&&!['localhost','127.0.0.1'].includes(base.hostname))throw Error('Servidor precisa usar HTTPS.');
+ const url=base.href.replace(/\/$/,'')+'/v1/admin/copy/installers';
+ await new Promise((resolve,reject)=>{
+  const req=new XMLHttpRequest();req.open('POST',url,true);req.responseType='blob';req.timeout=30000;req.setRequestHeader('Content-Type','application/json');req.setRequestHeader('Authorization','Bearer '+token);
+  req.onload=async()=>{if(req.status>=200&&req.status<300){const disposition=req.getResponseHeader('Content-Disposition')||'',match=/filename="?([^";]+)"?/i.exec(disposition),name=match?.[1]||'tokai-copy-installer.zip',href=URL.createObjectURL(req.response),link=document.createElement('a');link.href=href;link.download=name;document.body.appendChild(link);link.click();link.remove();setTimeout(()=>URL.revokeObjectURL(href),1000);resolve();return;}let message='Não foi possível gerar o pacote individual.';try{const body=JSON.parse(await req.response.text());message=body.error||message;}catch{}reject(Error(message));};
+  req.onerror=()=>reject(Error('Não foi possível conectar ao servidor para gerar o pacote.'));
+  req.ontimeout=()=>reject(Error('A geração do pacote demorou para responder. Tente novamente.'));
+  req.send(JSON.stringify({agent_id:agentId}));
+ });
+}
 function remember(){try{if(identity?.role==='reader')sessionStorage.setItem('tokai.session',token);else sessionStorage.removeItem('tokai.session');}catch{}}
 function clearAccess(){token='';identity=null;data=null;page='home';followCandles=true;chartScrollLeft=0;adminUsers=[];inviteResult=null;adminMessage='';remember();updateNav();}
 async function logout(){try{await window.tokaiPush?.disable(api);}catch{}const previous=token;clearAccess();error='';login();try{await api('/v1/auth/logout',{},previous);}catch{}}
@@ -138,7 +151,7 @@ function copyPage(){
  const agentOptions=agents.filter(function(x){return !x.agent;}).map(function(x){return '<option value="'+esc(x.user.id)+'">'+esc(x.user.display_name)+'</option>';}).join('');
  const configuredOptions=agents.filter(function(x){return x.agent;}).map(function(x){return '<option value="'+esc(x.agent.id)+'">'+esc(x.user.display_name)+' · '+esc(x.agent.expected_account)+'</option>';}).join('');
  const agentForm='<form id="copy-agent-form"><div class="field"><label for="copy-user">Aluno</label><select id="copy-user" required>'+agentOptions+'</select></div><div class="field"><label for="copy-account">Conta MT5</label><input id="copy-account" inputmode="numeric" required></div><div class="field"><label for="copy-server">Servidor MT5</label><input id="copy-server" value="Exness-MT5Trial3" required></div><div class="field"><label for="copy-agent-loss">Limite diário (%)</label><input id="copy-agent-loss" type="number" min="0.1" max="'+esc(s.max_daily_loss_percent)+'" step="0.1" value="'+esc(s.max_daily_loss_percent)+'" required></div><button class="btn">Cadastrar agente</button></form>';
- const licenseForm='<form id="copy-license-form"><div class="field"><label for="copy-license-agent">Agente cadastrado</label><select id="copy-license-agent" required>'+configuredOptions+'</select></div><button class="btn goldbtn">Gerar instalador e licença</button><button class="btn danger" type="button" id="copy-license-revoke">Revogar licença</button></form>';
+ const licenseForm='<form id="copy-license-form"><div class="field"><label for="copy-license-agent">Agente cadastrado</label><select id="copy-license-agent" required>'+configuredOptions+'</select></div><button class="btn goldbtn">Baixar pacote individual</button><button class="btn danger" type="button" id="copy-license-revoke">Revogar licença</button></form><p class="sub">Cada download cria uma licença única, vinculada à conta e ao servidor do aluno. Um novo pacote revoga a licença anterior.</p>';
  const table='<div class="tablewrap"><table class="table"><thead><tr><th>ALUNO</th><th>CONTA</th><th>STATUS</th><th>LIMITE</th></tr></thead><tbody>'+rows+'</tbody></table></div>';
  return heading('Copy Trading','Controle de execução, perda diária e agentes MT5.')+'<div class="grid g2">'+card('Controle global',form)+card('Cadastrar conta MT5',agentForm)+'</div>'+card('Licença e instalador individual',licenseForm)+(copyMessage?'<div class="alert">'+esc(copyMessage)+'</div>':'')+card('Agentes Copy',table);
 }
@@ -197,7 +210,7 @@ function render(){
  document.querySelectorAll('[data-page]').forEach(b=>b.onclick=()=>{page=b.dataset.page;render();window.scrollTo(0,0);if(page==='users')loadUsers();if(page==='copy')loadCopy();});
  document.getElementById('copy-retry')?.addEventListener('click',loadCopy);
  document.getElementById('copy-agent-form')?.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/admin/copy/agents',{user_id:document.getElementById('copy-user').value,expected_account:document.getElementById('copy-account').value,broker_server:document.getElementById('copy-server').value,daily_loss_percent:Number(document.getElementById('copy-agent-loss').value)});copyMessage='Conta MT5 cadastrada.';await loadCopy();}catch(x){copyMessage=x.message;render();}});
- document.getElementById('copy-license-form')?.addEventListener('submit',async e=>{e.preventDefault();try{const r=await api('/v1/admin/copy/licenses',{agent_id:document.getElementById('copy-license-agent').value});copyMessage='Licença do instalador: '+r.license+' — copie agora; ela não será exibida novamente.';render();}catch(x){copyMessage=x.message;render();}});
+ document.getElementById('copy-license-form')?.addEventListener('submit',async e=>{e.preventDefault();const button=e.target.querySelector('button');button.disabled=true;try{await downloadCopyInstaller(document.getElementById('copy-license-agent').value);copyMessage='Pacote individual baixado. A licença foi vinculada à conta e a licença anterior, se existia, foi revogada.';render();}catch(x){copyMessage=x.message;render();}});
  document.getElementById('copy-license-revoke')?.addEventListener('click',async()=>{if(!window.confirm('Revogar a licença deste agente?'))return;try{await api('/v1/admin/copy/licenses/revoke',{agent_id:document.getElementById('copy-license-agent').value});copyMessage='Licença revogada.';await loadCopy();}catch(x){copyMessage=x.message;render();}});
  document.getElementById('copy-settings-form')?.addEventListener('submit',async e=>{e.preventDefault();try{await api('/v1/admin/copy/settings',{execution_mode:document.getElementById('copy-mode').value,max_daily_loss_percent:Number(document.getElementById('copy-loss').value)});await loadCopy();}catch(x){copyMessage=x.message;render();}});
  document.querySelectorAll('[data-tf]').forEach(b=>b.onclick=()=>{tf=b.dataset.tf;followCandles=true;chartScrollLeft=0;chartYScale=1;chartYPan=0;render();});
