@@ -1,5 +1,5 @@
 #property strict
-#property version "1.10"
+#property version "1.20"
 // TOKAI COPY FOLLOWER
 // A conta da corretora permanece local no MT5. A licença é vinculada a uma única conta e instalação.
 // V1: XAUUSD em contas MT5 com modo hedging. A API deve estar liberada em Ferramentas > Opções > Expert Advisors.
