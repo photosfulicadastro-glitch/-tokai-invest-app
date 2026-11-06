@@ -36,9 +36,10 @@ async function installerZip({license,agent,origin}){
   '3. Anexe o EA compilado a um gráfico do XAUUSD da conta vinculada.',
   '4. Em Ferramentas > Opções > Expert Advisors, adicione https://sinais.tokaiinvest.jp à lista de WebRequest permitido.',
   '5. Na aba Inputs do EA, use Carregar e selecione TokaiCopyFollower.set deste pacote.',
-  '6. Ative Permitir negociação algorítmica somente quando a Tokai autorizar a etapa de homologação.',
+  '6. Ative Permitir negociação algorítmica quando o modo global do Copy autorizar esta conta.',
   '',
   'A senha da corretora nunca é solicitada nem enviada pela Tokai.',
+  'Este EA exige conta MT5 em modo hedging; contas netting não são compatíveis.',
   'O limite diário é aplicado pelo servidor e pelo EA; ele pausa somente novas entradas copiadas.',
   ''
  ].join('\r\n');
