@@ -2,7 +2,7 @@ import http from 'node:http';
 import {createPush} from './push.mjs';
 import {createAuth,HttpError,readJson} from './auth.mjs';
 import {sqliteStore,postgresStore} from './storage.mjs';
-import {createHash,timingSafeEqual} from 'node:crypto';
+import {createHash,timingSafeEqual,randomBytes,randomUUID} from 'node:crypto';
 const hash=s=>createHash('sha256').update(s).digest();
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
 export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
@@ -26,6 +26,27 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    const user=allowed(token,viewerToken)?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
    const isAdmin=user?.role==='admin';
    if(await auth.route(req,send,isAdmin,token))return;
+   if(req.url==='/v1/admin/copy/overview'&&req.method==='GET'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const [settings,users]=await Promise.all([db.copy.settings(),db.auth.list()]);
+    const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id)})));
+    return send(200,{settings,agents});
+   }
+   if(req.url==='/v1/admin/copy/settings'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req),mode=['off','demo','real','both'].includes(b.execution_mode)?b.execution_mode:null,loss=Number(b.max_daily_loss_percent);
+    if(!mode||!Number.isFinite(loss)||loss<=0||loss>100)return send(400,{error:'Configuração de Copy inválida.'});
+    return send(200,{settings:await db.copy.setSettings({executionMode:mode,maxDailyLossPercent:loss,now:now()})});
+   }
+   if(req.url==='/v1/admin/copy/agents'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req),account=String(b.expected_account||'').trim(),server=String(b.broker_server||'').trim(),loss=Number(b.daily_loss_percent);
+    if(typeof b.user_id!=='string'||!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120||!Number.isFinite(loss)||loss<=0||loss>100)return send(400,{error:'Dados do agente inválidos.'});
+    const settings=await db.copy.settings();if(loss>settings.max_daily_loss_percent)return send(400,{error:'O limite do aluno não pode superar o teto da Tokai.'});
+    const agentToken=randomBytes(32).toString('base64url');const agent=await db.copy.createAgent({id:randomUUID(),userId:b.user_id,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(agentToken).digest('hex'),dailyLossPercent:loss,now:now()});
+    if(!agent)return send(409,{error:'Este aluno já possui agente Copy configurado.'});
+    return send(201,{agent,token:agentToken});
+   }
    if(ingestion?!allowed(token,ingestToken):!user)return send(401,{error:'Acesso não autorizado'});
    if(await (await pushReady).route(req,send,user))return;
    if(req.url==='/v1/me'&&req.method==='GET')return send(200,{user});
