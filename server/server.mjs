@@ -50,6 +50,8 @@ async function installerZip({license,agent,origin}){
  return zip([{name:'TokaiCopyFollower.mq5',body:ea},{name:'TokaiCopyFollower.set',body:settings},{name:'LEIA-ME.txt',body:readme}]);
 }
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
+const copyServiceActive=(entry,time)=>entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
+const copyAccessUntil=value=>{if(value===null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;const time=Date.parse(value+'T14:59:59.999Z');return Number.isSafeInteger(time)&&time>0?time:undefined;};
 export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
@@ -74,13 +76,14 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    if(req.url==='/v1/admin/copy/overview'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const [settings,users,events]=await Promise.all([db.copy.settings(),db.auth.list(),db.copy.recentEvents(80)]);
-    const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id)})));
+    const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id),membership:await db.copy.copyMembership(u.id)})));
     return send(200,{settings,agents,events});
    }
    if(req.url==='/v1/admin/copy/installers'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const b=await readJson(req);if(typeof b.agent_id!=='string')return send(400,{error:'Agente inválido.'});
     const agent=await db.copy.agentById(b.agent_id);if(!agent)return send(404,{error:'Agente não encontrado.'});
+    if(!await db.copy.copyAccess(agent.user_id,now()))return send(403,{error:'A assinatura Copy deste aluno está pausada ou expirada.'});
     await db.copy.revokeLicenses({agentId:agent.id,now:now()});
     const license=randomBytes(32).toString('base64url');
     const issued=await db.copy.issueLicense({id:randomUUID(),agentId:agent.id,licenseHash:createHash('sha256').update(license).digest('hex'),now:now()});
@@ -106,11 +109,19 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!mode||!Number.isFinite(loss)||loss<=0||loss>100)return send(400,{error:'Configuração de Copy inválida.'});
     return send(200,{settings:await db.copy.setSettings({executionMode:mode,maxDailyLossPercent:loss,now:now()})});
    }
+   if(req.url==='/v1/admin/copy/memberships'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req),status=['active','paused'].includes(b.status)?b.status:null,accessUntil=copyAccessUntil(b.access_until);
+    if(typeof b.user_id!=='string'||!status||accessUntil===undefined)return send(400,{error:'Assinatura Copy inválida.'});
+    const users=await db.auth.list();if(!users.some(u=>u.id===b.user_id))return send(404,{error:'Aluno não encontrado.'});
+    return send(200,{membership:await db.copy.setCopyMembership({userId:b.user_id,status,accessUntil,now:now()})});
+   }
    if(req.url==='/v1/admin/copy/agents'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const b=await readJson(req),account=String(b.expected_account||'').trim(),server=String(b.broker_server||'').trim(),loss=Number(b.daily_loss_percent);
     if(typeof b.user_id!=='string'||!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120||!Number.isFinite(loss)||loss<=0||loss>100)return send(400,{error:'Dados do agente inválidos.'});
     const settings=await db.copy.settings();if(loss>settings.max_daily_loss_percent)return send(400,{error:'O limite do aluno não pode superar o teto da Tokai.'});
+    if(!await db.copy.copyAccess(b.user_id,now()))return send(400,{error:'Ative primeiro a assinatura Copy deste aluno.'});
     const agentToken=randomBytes(32).toString('base64url');const agent=await db.copy.createAgent({id:randomUUID(),userId:b.user_id,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(agentToken).digest('hex'),dailyLossPercent:loss,now:now()});
     if(!agent)return send(409,{error:'Este aluno já possui agente Copy configurado.'});
     return send(201,{agent,token:agentToken});
@@ -121,6 +132,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200||!Number.isFinite(equity)||equity<=0)return send(400,{error:'Dados do agente inválidos.'});
     const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
     if(!entry||entry.status!=='active'||entry.expected_account!==account||entry.broker_server!==serverName||entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Agente não autorizado.'});
+    if(!copyServiceActive(entry,now()))return send(403,{error:'Assinatura Copy indisponível.'});
     const settings=await db.copy.settings();const {row}=await db.read();const master=row?JSON.parse(row.body):null;
     await db.copy.heartbeat({id:entry.agent_id,status:'connected',equity,error:null,now:now()});
     return send(200,{execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD',master:master?{observed_at:master.observed_at,symbol:master.symbol,positions:master.positions}:null});
@@ -140,6 +152,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200)return send(400,{error:'Dados de ativação inválidos.'});
     const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
     if(!entry||entry.status==='revoked'||entry.expected_account!==account||entry.broker_server!==serverName)return send(403,{error:'Licença não autorizada para esta conta.'});
+    if(!copyServiceActive(entry,now()))return send(403,{error:'Assinatura Copy indisponível.'});
     if(entry.status==='active'&&entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Licença já ativada em outra instalação.'});
     if(entry.status==='issued')await db.copy.activateLicense({id:entry.id,fingerprint,now:now()});
     const settings=await db.copy.settings();
