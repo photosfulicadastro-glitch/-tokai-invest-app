@@ -4,7 +4,7 @@ const scrypt=promisify(scryptCallback);
 const digest=s=>createHash('sha256').update(s).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
 const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,plan_code:['signals','copy','signals_copy'].includes(u.plan_code)?u.plan_code:'signals',role:'reader'});
-export const TERMS_VERSION='signals-risk-v1';
+export const TERMS_VERSION='signals-copy-risk-v2';
 export class HttpError extends Error {constructor(status,message){super(message);this.status=status;}}
 export async function readJson(req,limit=8192){
  let size=0;const chunks=[];
@@ -61,6 +61,22 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
      if(typeof b.current!=='string'||b.current.length>128||!await expensive(()=>matches(b.current,admin?.password_hash)))throw new HttpError(401,'Senha atual inválida.');
     }
     await repo.setAdminPassword(await expensive(()=>passwordHash(b.password)));send(200,{ok:true});return true;
+   }
+   if(req.method==='POST'&&req.url==='/v1/auth/register'){
+    throttle('global-register',20,60*60000);const b=await readJson(req);
+    const username=typeof b.username==='string'?b.username.trim().toLowerCase():'',name=typeof b.name==='string'?b.name.trim():'';
+    const plan=['signals','copy','signals_copy'].includes(b.plan)?b.plan:null;
+    const account=typeof b.mt5_account==='string'?b.mt5_account.trim():'',server=typeof b.broker_server==='string'?b.broker_server.trim():'';
+    if(!/^[a-z0-9._-]{3,48}$/.test(username)||!name||name.length>80||typeof b.password!=='string'||b.password.length!==9||!plan)throw new HttpError(400,'Informe nome, usuário válido, plano e senha de exatamente 9 caracteres.');
+    if(b.terms_accepted!==true||b.terms_version!==TERMS_VERSION)throw new HttpError(400,'Leia e aceite o Termo de Ciência de Riscos para concluir o cadastro.');
+    const needsCopy=plan==='copy'||plan==='signals_copy';
+    if(needsCopy&&(!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120))throw new HttpError(400,'Para Copy, informe a conta MT5 e o servidor da corretora.');
+    const password=await expensive(()=>passwordHash(b.password));
+    const registered=await repo.register({id:randomUUID(),username,name,passwordHash:password,plan,account:needsCopy?account:null,server:needsCopy?server:null,now:now()});
+    if(!registered)throw new HttpError(409,'Esse nome de usuário já está cadastrado.');
+    await repo.acceptTerms(registered.id,TERMS_VERSION,now());
+    await syncPlan({userId:registered.id,plan,status:'paused',accessUntil:null,now:now()});
+    send(202,{ok:true,message:'Cadastro recebido. A equipe Tokai revisará os dados e liberará o acesso.'});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/auth/login'){
     throttle('global-login',100,60000);const b=await readJson(req);
