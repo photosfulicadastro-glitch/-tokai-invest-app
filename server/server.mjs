@@ -127,6 +127,22 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     return send(201,{agent,token:agentToken});
    }
    
+   if(req.url==='/v1/copy/me'&&req.method==='GET'){
+    if(!user||isAdmin)return send(403,{error:'Acesso de aluno necessário.'});
+    const [membership,agent,settings]=await Promise.all([db.copy.copyMembership(user.id),db.copy.agentForUser(user.id),db.copy.settings()]);
+    const events=agent?await db.copy.eventsForAgent(agent.id,30):[];
+    return send(200,{membership,agent,settings:{max_daily_loss_percent:settings.max_daily_loss_percent,execution_mode:settings.execution_mode},events});
+   }
+   if(req.url==='/v1/copy/preferences'&&req.method==='POST'){
+    if(!user||isAdmin)return send(403,{error:'Acesso de aluno necessário.'});
+    const b=await readJson(req),loss=Number(b.daily_loss_percent),time=now();
+    const [membership,agent,settings]=await Promise.all([db.copy.copyMembership(user.id),db.copy.agentForUser(user.id),db.copy.settings()]);
+    if(!copyServiceActive({membership_status:membership?.status,membership_access_until:membership?.access_until},time))return send(403,{error:'Assinatura Copy indisponível.'});
+    if(!agent)return send(400,{error:'Sua conta MT5 ainda não foi cadastrada.'});
+    const maximum=Math.min(Number(agent.daily_loss_percent),Number(settings.max_daily_loss_percent));
+    if(!Number.isFinite(loss)||loss<=0||loss>maximum)return send(400,{error:'Você pode apenas reduzir seu limite, até '+maximum+'%.'});
+    return send(200,{agent:await db.copy.setAgentLimit({userId:user.id,dailyLossPercent:loss,now:time})});
+   }
    if(req.url==='/v1/copy/plan'&&req.method==='POST'){
     const b=await readJson(req);const license=typeof b.license==='string'?b.license:'';const account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||''),equity=Number(b.equity);
     if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200||!Number.isFinite(equity)||equity<=0)return send(400,{error:'Dados do agente inválidos.'});
