@@ -51,6 +51,11 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id)})));
     return send(200,{settings,agents});
    }
+   if(req.url==='/v1/admin/copy/licenses/revoke'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req);if(typeof b.agent_id!=='string')return send(400,{error:'Agente inválido.'});
+    await db.copy.revokeLicenses({agentId:b.agent_id,now:now()});return send(200,{ok:true});
+   }
    if(req.url==='/v1/admin/copy/licenses'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const b=await readJson(req);if(typeof b.agent_id!=='string')return send(400,{error:'Agente inválido.'});
