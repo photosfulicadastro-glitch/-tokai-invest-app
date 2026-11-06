@@ -3,7 +3,7 @@ import {promisify} from 'node:util';
 const scrypt=promisify(scryptCallback);
 const digest=s=>createHash('sha256').update(s).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
-const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,role:'reader'});
+const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,plan_code:['signals','copy','signals_copy'].includes(u.plan_code)?u.plan_code:'signals',role:'reader'});
 export const TERMS_VERSION='signals-risk-v1';
 export class HttpError extends Error {constructor(status,message){super(message);this.status=status;}}
 export async function readJson(req,limit=8192){
@@ -28,7 +28,7 @@ function accessUntil(value,fallback){
  const time=Date.parse(value+'T14:59:59.999Z'); // fim do dia selecionado no horário do Japão
  return Number.isSafeInteger(time)&&time>0?time:undefined;
 }
-export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
+export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPlan=async()=>{}){
  const attempts=new Map();let inFlight=0,lastCleanup=0;
  function throttle(key,max,ms){
   const time=now();for(const [k,v] of attempts)if(v.until<=time)attempts.delete(k);
@@ -37,7 +37,7 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
   if(entry.count>max)throw new HttpError(429,'Muitas tentativas. Aguarde alguns minutos.');
  }
  async function expensive(fn){if(inFlight>=2)throw new HttpError(429,'Servidor ocupado. Tente novamente em instantes.');inFlight++;try{return await fn();}finally{inFlight--;}}
- async function session(user){const value=secret(),expires=now()+12*60*60*1000;if(!await repo.session(digest(value),user,expires,now()))throw new HttpError(401,'Acesso indisponível. Entre novamente.');return {token:value,expires_at:expires,user:publicUser(user)};}
+ async function session(user){const value=secret(),expires=now()+12*60*60*1000;if(!await repo.session(digest(value),user,expires,now()))throw new HttpError(401,'Acesso indisponível. Entre novamente.');return {token:value,expires_at:expires,user:publicUser((await repo.profile(user.id))||user)};}
  return {
   async resolve(token){if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;if(await repo.resolveAdmin(digest(token),now()))return {role:'admin',name:'Administrador'};const user=await repo.resolve(digest(token),now());return user?publicUser(user):null;},
   async route(req,send,isAdmin,token){
@@ -88,16 +88,18 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false){
     const name=typeof b.name==='string'?b.name.trim():'';
     if(!/^[a-z0-9._-]{3,48}$/.test(username)||!name||name.length>80)throw new HttpError(400,'Informe nome (até 80 caracteres) e usuário (3 a 48 letras, números, ponto, hífen ou sublinhado).');
     const invite=secret(),expires=now()+72*3600000;
-    const plan=['signals','premium'].includes(b.plan)?b.plan:'signals';
+    const plan=['signals','copy','signals_copy'].includes(b.plan)?b.plan:'signals';
     const until=accessUntil(b.access_until,now()+30*24*3600000);if(until===undefined)throw new HttpError(400,'Informe uma data de acesso válida.');
     const result=await repo.create({id:randomUUID(),username,name,hash:digest(invite),expires,now:now(),plan,accessUntil:until});
     if(!result)throw new HttpError(409,'Esse nome de usuário já está cadastrado.');
+    await syncPlan({userId:result.id,plan,status:'active',accessUntil:until,now:now()});
     send(201,{invite,expires_at:expires,username});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/admin/memberships'){
-    const b=await readJson(req);const plan=['signals','premium'].includes(b.plan)?b.plan:null;const status=['active','paused'].includes(b.status)?b.status:null;
+    const b=await readJson(req);const plan=['signals','copy','signals_copy'].includes(b.plan)?b.plan:null;const status=['active','paused'].includes(b.status)?b.status:null;
     const until=accessUntil(b.access_until,undefined);if(typeof b.id!=='string'||!plan||!status||until===undefined)throw new HttpError(400,'Dados da mensalidade inválidos.');
     const member=await repo.setMembership({id:b.id,plan,status,accessUntil:until,now:now()});if(!member)throw new HttpError(404,'Usuário não encontrado.');
+    await syncPlan({userId:b.id,plan,status,accessUntil:until,now:now()});
     send(200,{member});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/admin/access'){
