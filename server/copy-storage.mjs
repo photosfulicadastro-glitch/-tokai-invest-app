@@ -23,6 +23,14 @@ CREATE TABLE IF NOT EXISTS copy_agents (
  last_error TEXT
 );
 CREATE INDEX IF NOT EXISTS copy_agents_status ON copy_agents(status);
+CREATE TABLE IF NOT EXISTS copy_memberships (
+ user_id TEXT PRIMARY KEY REFERENCES signal_users(id),
+ status TEXT NOT NULL DEFAULT 'paused',
+ access_until BIGINT,
+ created_at BIGINT NOT NULL,
+ updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS copy_memberships_status ON copy_memberships(status);
 CREATE TABLE IF NOT EXISTS copy_licenses (
  id TEXT PRIMARY KEY,
  agent_id TEXT NOT NULL REFERENCES copy_agents(id),
@@ -55,13 +63,16 @@ export function copyRepository(query){
   settings:()=>one('SELECT * FROM copy_settings WHERE id=1'),
   setSettings:({executionMode,maxDailyLossPercent,now})=>one('UPDATE copy_settings SET execution_mode=$1,max_daily_loss_percent=$2,updated_at=$3 WHERE id=1 RETURNING *',[executionMode,maxDailyLossPercent,now]),
   agentForUser:userId=>one('SELECT id,user_id,expected_account,broker_server,status,daily_loss_percent,created_at,updated_at,last_seen_at,last_equity,last_error FROM copy_agents WHERE user_id=$1',[userId]),
+  copyMembership:userId=>one('SELECT user_id,status,access_until,created_at,updated_at FROM copy_memberships WHERE user_id=$1',[userId]),
+  setCopyMembership:({userId,status,accessUntil,now})=>one("INSERT INTO copy_memberships(user_id,status,access_until,created_at,updated_at) VALUES($1,$2,$3,$4,$4) ON CONFLICT(user_id) DO UPDATE SET status=excluded.status,access_until=excluded.access_until,updated_at=excluded.updated_at RETURNING user_id,status,access_until,created_at,updated_at",[userId,status,accessUntil,now]),
+  copyAccess:async(userId,now)=>!!(await one("SELECT user_id FROM copy_memberships WHERE user_id=$1 AND status='active' AND (access_until IS NULL OR access_until>=$2)",[userId,now])),
   agentByToken:hash=>one('SELECT * FROM copy_agents WHERE token_hash=$1',[hash]),
   agentById:id=>one('SELECT id,user_id,expected_account,broker_server,status,daily_loss_percent,created_at,updated_at,last_seen_at,last_equity,last_error FROM copy_agents WHERE id=$1',[id]),
   createAgent:a=>one('INSERT INTO copy_agents(id,user_id,expected_account,broker_server,token_hash,status,daily_loss_percent,created_at,updated_at) VALUES($1,$2,$3,$4,$5,\'pending\',$6,$7,$7) RETURNING id,user_id,expected_account,broker_server,status,daily_loss_percent,created_at,updated_at',[a.id,a.userId,a.expectedAccount,a.brokerServer,a.tokenHash,a.dailyLossPercent,a.now]),
   setAgentLimit:({userId,dailyLossPercent,now})=>one('UPDATE copy_agents SET daily_loss_percent=$1,updated_at=$2 WHERE user_id=$3 RETURNING id,user_id,expected_account,broker_server,status,daily_loss_percent,updated_at,last_seen_at,last_equity,last_error',[dailyLossPercent,now,userId]),
   issueLicense:l=>one('INSERT INTO copy_licenses(id,agent_id,license_hash,status,issued_at) VALUES($1,$2,$3,\'issued\',$4) RETURNING id,status,issued_at',[l.id,l.agentId,l.licenseHash,l.now]),
   markLicenseDownloaded:({id,now})=>one("UPDATE copy_licenses SET downloaded_at=$1 WHERE id=$2 AND status='issued' RETURNING id,status,issued_at,downloaded_at",[now,id]),
-  license:hash=>one('SELECT l.*,a.expected_account,a.broker_server,a.status AS agent_status,a.daily_loss_percent FROM copy_licenses l JOIN copy_agents a ON a.id=l.agent_id WHERE l.license_hash=$1',[hash]),
+  license:hash=>one("SELECT l.*,a.expected_account,a.broker_server,a.status AS agent_status,a.daily_loss_percent,m.status AS membership_status,m.access_until AS membership_access_until FROM copy_licenses l JOIN copy_agents a ON a.id=l.agent_id LEFT JOIN copy_memberships m ON m.user_id=a.user_id WHERE l.license_hash=$1",[hash]),
   activateLicense:({id,fingerprint,now})=>one("UPDATE copy_licenses SET status='active',activated_at=$1,terminal_fingerprint=$2,last_seen_at=$1 WHERE id=$3 AND status='issued' RETURNING id,status,activated_at",[now,fingerprint,id]),
   revokeLicenses:async({agentId,now})=>{await query("UPDATE copy_licenses SET status='revoked',revoked_at=$1 WHERE agent_id=$2 AND status IN ('issued','active')",[now,agentId]);return true;},
   heartbeat:({id,status,equity,error,now})=>one('UPDATE copy_agents SET status=$1,last_equity=$2,last_error=$3,last_seen_at=$4,updated_at=$4 WHERE id=$5 RETURNING id',[status,equity,error,now,id]),
