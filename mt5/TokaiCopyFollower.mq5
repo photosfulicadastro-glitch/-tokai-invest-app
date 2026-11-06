@@ -29,6 +29,8 @@ double openingEquity=0;
 bool activated=false,lossLocked=false;
 double currentDailyLoss=0;
 string lastStatus="Inicializando";
+string lastErrorKey="";
+datetime lastErrorAt=0;
 
 string Esc(string value){StringReplace(value,"\\","\\\\");StringReplace(value,"\"","\\\"");return value;}
 string Fingerprint(){return IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+"|"+AccountInfoString(ACCOUNT_SERVER)+"|"+TerminalInfoString(TERMINAL_DATA_PATH);}
@@ -49,6 +51,21 @@ bool Post(string path,string payload,string &response){
 bool Activate(){
  string response,payload="{\"license\":\""+Esc(License)+"\",\"account\":\""+IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+"\",\"server\":\""+Esc(AccountInfoString(ACCOUNT_SERVER))+"\",\"fingerprint\":\""+Esc(fingerprint)+"\"}";
  return Post("/v1/copy/activate",payload,response);
+}
+string TicketText(ulong ticket){return ticket>0?StringFormat("%I64u",ticket):"";}
+void Report(string eventType,string message,string masterId="",string copiedTicket=""){
+ if(!activated)return;
+ string ignored,payload="{\"license\":\""+Esc(License)+"\",\"account\":\""+IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+"\",\"server\":\""+Esc(AccountInfoString(ACCOUNT_SERVER))+"\",\"fingerprint\":\""+Esc(fingerprint)+"\",\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+",\"event_type\":\""+Esc(eventType)+"\",\"message\":\""+Esc(message)+"\",\"master_position_id\":\""+Esc(masterId)+"\",\"copied_ticket\":\""+Esc(copiedTicket)+"\"}";
+ Post("/v1/copy/report",payload,ignored);
+}
+void ReportError(string message,string masterId=""){
+ string key=message+"|"+masterId;datetime now=TimeCurrent();
+ if(key==lastErrorKey&&now-lastErrorAt<60)return;
+ lastErrorKey=key;lastErrorAt=now;Report("error",message,masterId,"");
+}
+void SetStatus(string value,string eventType="status"){
+ if(lastStatus==value)return;
+ lastStatus=value;Report(eventType,value,"","");
 }
 
 bool JsonStringField(const string json,const string key,string &value){
@@ -164,7 +181,8 @@ bool OpenForMaster(MasterPosition &master,double volume){
  volume=NormalizeVolume(volume);
  if(volume<=0)return false;
  bool sent=master.side=="BUY"?trade.Buy(volume,GoldSymbol,0,master.sl,master.tp,CommentFor(master.id)):trade.Sell(volume,GoldSymbol,0,master.sl,master.tp,CommentFor(master.id));
- if(!sent||!TradeResultOk()){Print("TOKAI COPY: falha ao abrir ",master.id," retcode=",trade.ResultRetcode()," ",trade.ResultRetcodeDescription());return false;}
+ if(!sent||!TradeResultOk()){string message="Falha ao abrir: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message," ",master.id);ReportError(message,master.id);return false;}
+ Report("opened",(master.side=="BUY"?"Compra":"Venda")+" copiada",master.id,TicketText(trade.ResultDeal()));
  return true;
 }
 void ModifyForMaster(MasterPosition &master){
@@ -176,7 +194,7 @@ void ModifyForMaster(MasterPosition &master){
   if(PositionGetInteger(POSITION_MAGIC)!=(long)TokaiMagic||PositionGetString(POSITION_COMMENT)!=wanted)continue;
   double currentSl=PositionGetDouble(POSITION_SL),currentTp=PositionGetDouble(POSITION_TP);
   if(MathAbs(currentSl-master.sl)<=point/2&&MathAbs(currentTp-master.tp)<=point/2)continue;
-  if(!trade.PositionModify(ticket,master.sl,master.tp)||!TradeResultOk())Print("TOKAI COPY: falha ao ajustar SL/TP de ",master.id," retcode=",trade.ResultRetcode());
+  if(!trade.PositionModify(ticket,master.sl,master.tp)||!TradeResultOk()){string message="Falha ao ajustar SL/TP: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message," ",master.id);ReportError(message,master.id);}else Report("modified","SL/TP atualizado",master.id,TicketText(ticket));
  }
 }
 void CloseMaster(string masterId){
@@ -185,7 +203,7 @@ void CloseMaster(string masterId){
   ulong ticket=PositionGetTicket(i);
   if(ticket==0||!PositionSelectByTicket(ticket))continue;
   if(PositionGetInteger(POSITION_MAGIC)!=(long)TokaiMagic||PositionGetString(POSITION_COMMENT)!=wanted)continue;
-  if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk())Print("TOKAI COPY: falha ao fechar ",masterId," retcode=",trade.ResultRetcode());
+  if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk()){string message="Falha ao fechar: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message," ",masterId);ReportError(message,masterId);}else Report("closed","Posição fechada",masterId,TicketText(ticket));
  }
 }
 void ReduceTo(string masterId,double wanted){
@@ -198,9 +216,9 @@ void ReduceTo(string masterId,double wanted){
   if(PositionGetInteger(POSITION_MAGIC)!=(long)TokaiMagic||PositionGetString(POSITION_COMMENT)!=comment)continue;
   double volume=PositionGetDouble(POSITION_VOLUME);
   if(difference>=volume-SymbolInfoDouble(GoldSymbol,SYMBOL_VOLUME_STEP)/2){
-   if(trade.PositionClose(ticket,(ulong)MaxSlippagePoints)&&TradeResultOk())difference-=volume;
+   if(trade.PositionClose(ticket,(ulong)MaxSlippagePoints)&&TradeResultOk()){difference-=volume;Report("reduced","Volume reduzido",masterId,TicketText(ticket));}else ReportError("Falha ao reduzir: "+trade.ResultRetcodeDescription(),masterId);
   }else{
-   if(trade.PositionClosePartial(ticket,difference,(ulong)MaxSlippagePoints)&&TradeResultOk())difference=0;
+   if(trade.PositionClosePartial(ticket,difference,(ulong)MaxSlippagePoints)&&TradeResultOk()){difference=0;Report("reduced","Volume reduzido",masterId,TicketText(ticket));}else ReportError("Falha ao reduzir: "+trade.ResultRetcodeDescription(),masterId);
   }
  }
 }
@@ -211,7 +229,7 @@ void CloseRemoved(MasterPosition &masters[]){
   if(PositionGetInteger(POSITION_MAGIC)!=(long)TokaiMagic)continue;
   string comment=PositionGetString(POSITION_COMMENT);
   if(!IsTokaiComment(comment)||IsMasterPresent(masters,MasterIdFromComment(comment)))continue;
-  if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk())Print("TOKAI COPY: falha ao fechar posição removida retcode=",trade.ResultRetcode());
+  if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk()){string message="Falha ao fechar posição removida: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message);ReportError(message,MasterIdFromComment(comment));}else Report("closed","Fechamento recebido da conta-mãe",MasterIdFromComment(comment),TicketText(ticket));
  }
 }
 void SyncPositions(MasterPosition &masters[],bool allowNewEntries){
@@ -238,19 +256,19 @@ void SyncPositions(MasterPosition &masters[],bool allowNewEntries){
 }
 void PollAndCopy(){
  string response,payload="{\"license\":\""+Esc(License)+"\",\"account\":\""+IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+"\",\"server\":\""+Esc(AccountInfoString(ACCOUNT_SERVER))+"\",\"fingerprint\":\""+Esc(fingerprint)+"\",\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+"}";
- if(!Post("/v1/copy/plan",payload,response)){lastStatus="Sem conexão ou licença revogada";return;}
+ if(!Post("/v1/copy/plan",payload,response)){SetStatus("Sem conexão ou licença revogada","error");return;}
  string mode;
  double serverLimit,observedAt;
  MasterPosition masters[];
- if(!JsonStringField(response,"execution_mode",mode)||!JsonNumberField(response,"max_daily_loss_percent",serverLimit)||!JsonNumberField(response,"observed_at",observedAt)||!ParseMasterPositions(response,masters)){lastStatus="Plano inválido ou conta-mãe indisponível";return;}
- if(TimeGMT()-(datetime)observedAt>MasterMaxAgeSeconds){lastStatus="Conta-mãe sem atualização recente";return;}
- if(mode=="off"){lastStatus="Copy desligado pelo administrador";return;}
- if(!AccountIsAllowed(mode)){lastStatus="Conta não permitida pelo modo global";return;}
+ if(!JsonStringField(response,"execution_mode",mode)||!JsonNumberField(response,"max_daily_loss_percent",serverLimit)||!JsonNumberField(response,"observed_at",observedAt)||!ParseMasterPositions(response,masters)){SetStatus("Plano inválido ou conta-mãe indisponível","error");return;}
+ if(TimeGMT()-(datetime)observedAt>MasterMaxAgeSeconds){SetStatus("Conta-mãe sem atualização recente");return;}
+ if(mode=="off"){SetStatus("Copy desligado pelo administrador");return;}
+ if(!AccountIsAllowed(mode)){SetStatus("Conta não permitida pelo modo global","blocked");return;}
  double limit=MathMin(LocalDailyLossPercent,serverLimit);
  bool limitLocked=currentDailyLoss>=limit;
  bool allowNewEntries=!lossLocked&&!limitLocked&&limit>0;
  SyncPositions(masters,allowNewEntries);
- lastStatus=(lossLocked||limitLocked)?"Novas entradas pausadas por limite diário":"Sincronizado — "+IntegerToString(ArraySize(masters))+" posição(ões) da conta-mãe";
+ SetStatus((lossLocked||limitLocked)?"Novas entradas pausadas por limite diário":"Sincronizado — "+IntegerToString(ArraySize(masters))+" posição(ões) da conta-mãe",(lossLocked||limitLocked)?"blocked":"status");
 }
 int OnInit(){
  if(StringFind(ApiUrl,"https://")!=0||StringLen(License)!=43||ExpectedAccount==0||ExpectedServer==""||AccountInfoInteger(ACCOUNT_LOGIN)!=ExpectedAccount||AccountInfoString(ACCOUNT_SERVER)!=ExpectedServer||!SymbolSelect(GoldSymbol,true))return INIT_PARAMETERS_INCORRECT;
@@ -259,6 +277,7 @@ int OnInit(){
  fingerprint=Fingerprint();dayKey=TokyoDay();openingEquity=AccountInfoDouble(ACCOUNT_EQUITY);
  trade.SetExpertMagicNumber((ulong)TokaiMagic);trade.SetDeviationInPoints((ulong)MaxSlippagePoints);trade.SetTypeFillingBySymbol(GoldSymbol);
  activated=Activate();if(!activated){Print("TOKAI COPY: ativação recusada.");return INIT_FAILED;}
+ Report("activated","Licença ativada para esta instalação","","");
  EventSetTimer(2);lastStatus="Ativado; aguardando plano";return INIT_SUCCEEDED;
 }
 void OnDeinit(const int reason){EventKillTimer();}
