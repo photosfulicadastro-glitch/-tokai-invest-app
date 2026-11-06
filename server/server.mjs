@@ -48,8 +48,8 @@ async function installerZip({license,agent,origin}){
   'O limite diário é aplicado pelo servidor e pelo EA; ele pausa somente novas entradas copiadas.',
   ''
  ].join('\r\n');
- const ea=await readFile(new URL('../mt5/TokaiCopyFollower.mq5',import.meta.url),'utf8');
- return zip([{name:'TokaiCopyFollower.mq5',body:ea},{name:'TokaiCopyFollower.set',body:settings},{name:'LEIA-ME.txt',body:readme}]);
+ const executable=await readFile(new URL('../mt5/TokaiCopyFollower.ex5',import.meta.url));
+ return zip([{name:'TokaiCopyFollower.ex5',body:executable},{name:'TokaiCopyFollower.set',body:settings},{name:'LEIA-ME.txt',body:readme}]);
 }
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
 const copyServiceActive=(entry,time)=>entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
@@ -79,7 +79,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    if(req.url==='/v1/admin/copy/overview'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const [settings,users,events]=await Promise.all([db.copy.settings(),db.auth.list(),db.copy.recentEvents(80)]);
-    const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id),membership:await db.copy.copyMembership(u.id)})));
+    const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id),membership:await db.copy.copyMembership(u.id),registration:u.requested_mt5_account?{mt5_account:u.requested_mt5_account,broker_server:u.requested_broker_server,requested_plan:u.requested_plan,terms_accepted_at:u.terms_accepted_at}:null})));
     return send(200,{settings,agents,events});
    }
    if(req.url==='/v1/admin/copy/installers'&&req.method==='POST'){
