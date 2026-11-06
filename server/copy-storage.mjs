@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS copy_licenses (
  last_seen_at BIGINT
 );
 CREATE INDEX IF NOT EXISTS copy_licenses_agent ON copy_licenses(agent_id);
+CREATE UNIQUE INDEX IF NOT EXISTS copy_licenses_current_agent ON copy_licenses(agent_id) WHERE status IN ('issued','active');
 CREATE TABLE IF NOT EXISTS copy_agent_events (
  id TEXT PRIMARY KEY,
  agent_id TEXT NOT NULL REFERENCES copy_agents(id),
@@ -72,6 +73,7 @@ export function copyRepository(query){
   setAgentLimit:({userId,dailyLossPercent,now})=>one('UPDATE copy_agents SET daily_loss_percent=$1,updated_at=$2 WHERE user_id=$3 RETURNING id,user_id,expected_account,broker_server,status,daily_loss_percent,updated_at,last_seen_at,last_equity,last_error',[dailyLossPercent,now,userId]),
   issueLicense:l=>one('INSERT INTO copy_licenses(id,agent_id,license_hash,status,issued_at) VALUES($1,$2,$3,\'issued\',$4) RETURNING id,status,issued_at',[l.id,l.agentId,l.licenseHash,l.now]),
   markLicenseDownloaded:({id,now})=>one("UPDATE copy_licenses SET downloaded_at=$1 WHERE id=$2 AND status='issued' RETURNING id,status,issued_at,downloaded_at",[now,id]),
+  currentLicenseForAgent:agentId=>one("SELECT id,agent_id,status,issued_at,downloaded_at,activated_at,revoked_at,last_seen_at FROM copy_licenses WHERE agent_id=$1 AND status IN ('issued','active') ORDER BY issued_at DESC LIMIT 1",[agentId]),
   license:hash=>one("SELECT l.*,a.expected_account,a.broker_server,a.status AS agent_status,a.daily_loss_percent,m.status AS membership_status,m.access_until AS membership_access_until FROM copy_licenses l JOIN copy_agents a ON a.id=l.agent_id LEFT JOIN copy_memberships m ON m.user_id=a.user_id WHERE l.license_hash=$1",[hash]),
   activateLicense:({id,fingerprint,now})=>one("UPDATE copy_licenses SET status='active',activated_at=$1,terminal_fingerprint=$2,last_seen_at=$1 WHERE id=$3 AND status='issued' RETURNING id,status,activated_at",[now,fingerprint,id]),
   revokeLicenses:async({agentId,now})=>{await query("UPDATE copy_licenses SET status='revoked',revoked_at=$1 WHERE agent_id=$2 AND status IN ('issued','active')",[now,agentId]);return true;},
