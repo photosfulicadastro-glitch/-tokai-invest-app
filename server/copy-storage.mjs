@@ -77,6 +77,7 @@ export function copyRepository(query){
   revokeLicenses:async({agentId,now})=>{await query("UPDATE copy_licenses SET status='revoked',revoked_at=$1 WHERE agent_id=$2 AND status IN ('issued','active')",[now,agentId]);return true;},
   heartbeat:({id,status,equity,error,now})=>one('UPDATE copy_agents SET status=$1,last_equity=$2,last_error=$3,last_seen_at=$4,updated_at=$4 WHERE id=$5 RETURNING id',[status,equity,error,now,id]),
   recordEvent:e=>one('INSERT INTO copy_agent_events(id,agent_id,license_id,event_type,master_position_id,copied_ticket,message,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,agent_id,event_type,master_position_id,copied_ticket,message,created_at',[e.id,e.agentId,e.licenseId,e.eventType,e.masterPositionId||null,e.copiedTicket||null,e.message,e.now]),
-  recentEvents:async(limit=80)=>(await query('SELECT id,agent_id,event_type,master_position_id,copied_ticket,message,created_at FROM copy_agent_events ORDER BY created_at DESC LIMIT $1',[limit])).rows
+  recentEvents:async(limit=80)=>(await query('SELECT id,agent_id,event_type,master_position_id,copied_ticket,message,created_at FROM copy_agent_events ORDER BY created_at DESC LIMIT $1',[limit])).rows,
+  eventsForAgent:async(agentId,limit=30)=>(await query('SELECT id,agent_id,event_type,master_position_id,copied_ticket,message,created_at FROM copy_agent_events WHERE agent_id=$1 ORDER BY created_at DESC LIMIT $2',[agentId,limit])).rows
  };
 }
