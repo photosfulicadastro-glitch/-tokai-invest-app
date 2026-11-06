@@ -8,7 +8,7 @@ import {sqliteStore} from '../server/storage.mjs';
 
 test('convite individual, privilégios, sessão persistente, revogação e recuperação',async()=>{
  const dir=mkdtempSync(join(tmpdir(),'tokai-auth-'));const path=join(dir,'auth.sqlite');
- let now=Date.now(),server,base,storage;const admin='a'.repeat(40),ingest='i'.repeat(40),password='Senha9!xy',consent={terms_accepted:true,terms_version:'signals-risk-v1'};
+ let now=Date.now(),server,base,storage;const admin='a'.repeat(40),ingest='i'.repeat(40),password='Senha9!xy',consent={terms_accepted:true,terms_version:'signals-copy-risk-v2'};
  async function start(){storage=sqliteStore(path);server=createApi({storage,ingestToken:ingest,viewerToken:admin,now:()=>now});await new Promise(r=>server.listen(0,'127.0.0.1',r));base=`http://127.0.0.1:${server.address().port}`;}
  async function stop(){await new Promise(r=>server.close(r));}
  async function req(path,token='',body){const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});return {status:r.status,data:await r.json()};}
@@ -18,6 +18,12 @@ test('convite individual, privilégios, sessão persistente, revogação e recup
   assert.equal((await req('/v1/admin/users',ingest)).status,403);
   assert.equal((await req('/v1/state')).status,401);
   assert.equal((await req('/v1/me',admin)).data.user.role,'admin');
+  const registration=await req('/v1/auth/register','',{name:'Aluno Copy',username:'aluno.copy',password:'Senha9!xy',plan:'signals_copy',mt5_account:'41277716',broker_server:'Exness-MT5Trial3',...consent});
+  assert.equal(registration.status,202);
+  const registered=await storage.auth.find('aluno.copy');assert.equal(registered.status,'pending');
+  const pending=(await req('/v1/admin/users',admin)).data.users.find(u=>u.username==='aluno.copy');
+  assert.equal(pending.requested_mt5_account,'41277716');assert.equal(pending.requested_broker_server,'Exness-MT5Trial3');assert(pending.terms_accepted_at);
+  assert.equal((await req('/v1/auth/register','',{name:'Sem termo',username:'sem.termo',password:'Senha9!xy',plan:'copy',mt5_account:'41277716',broker_server:'Exness-MT5Trial3'})).status,400);
   const invite=await req('/v1/admin/invites',admin,{username:'Maria.Silva',name:'Maria'});
   assert.equal(invite.status,201);assert.equal(invite.data.username,'maria.silva');
   assert.equal((await req('/v1/admin/invites',admin,{username:'maria.silva',name:'Outra'})).status,409);
