@@ -25,12 +25,29 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   try{
    const user=allowed(token,viewerToken)?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
    const isAdmin=user?.role==='admin';
+   if(req.url==='/v1/copy/activate'&&req.method==='POST'){
+    const b=await readJson(req);const license=typeof b.license==='string'?b.license:'';const account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||'');
+    if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200)return send(400,{error:'Dados de ativação inválidos.'});
+    const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
+    if(!entry||entry.status==='revoked'||entry.expected_account!==account||entry.broker_server!==serverName)return send(403,{error:'Licença não autorizada para esta conta.'});
+    if(entry.status==='active'&&entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Licença já ativada em outra instalação.'});
+    if(entry.status==='issued')await db.copy.activateLicense({id:entry.id,fingerprint,now:now()});
+    const settings=await db.copy.settings();
+    return send(200,{ok:true,execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD'});
+   }
    if(await auth.route(req,send,isAdmin,token))return;
    if(req.url==='/v1/admin/copy/overview'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const [settings,users]=await Promise.all([db.copy.settings(),db.auth.list()]);
     const agents=await Promise.all(users.map(async u=>({user:u,agent:await db.copy.agentForUser(u.id)})));
     return send(200,{settings,agents});
+   }
+   if(req.url==='/v1/admin/copy/licenses'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req);if(typeof b.agent_id!=='string')return send(400,{error:'Agente inválido.'});
+    await db.copy.revokeLicenses({agentId:b.agent_id,now:now()});
+    const license=randomBytes(32).toString('base64url');const issued=await db.copy.issueLicense({id:randomUUID(),agentId:b.agent_id,licenseHash:createHash('sha256').update(license).digest('hex'),now:now()});
+    return send(201,{license_id:issued.id,license,issued_at:issued.issued_at});
    }
    if(req.url==='/v1/admin/copy/settings'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
