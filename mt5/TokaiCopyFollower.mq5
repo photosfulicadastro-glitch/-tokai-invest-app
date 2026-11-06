@@ -27,6 +27,7 @@ CTrade trade;
 string fingerprint,dayKey;
 double openingEquity=0;
 bool activated=false,lossLocked=false;
+double currentDailyLoss=0;
 string lastStatus="Inicializando";
 
 string Esc(string value){StringReplace(value,"\\","\\\\");StringReplace(value,"\"","\\\"");return value;}
@@ -246,9 +247,10 @@ void PollAndCopy(){
  if(mode=="off"){lastStatus="Copy desligado pelo administrador";return;}
  if(!AccountIsAllowed(mode)){lastStatus="Conta não permitida pelo modo global";return;}
  double limit=MathMin(LocalDailyLossPercent,serverLimit);
- bool allowNewEntries=!lossLocked&&limit>0;
+ bool limitLocked=currentDailyLoss>=limit;
+ bool allowNewEntries=!lossLocked&&!limitLocked&&limit>0;
  SyncPositions(masters,allowNewEntries);
- lastStatus=lossLocked?"Novas entradas pausadas por limite diário":"Sincronizado — "+IntegerToString(ArraySize(masters))+" posição(ões) da conta-mãe";
+ lastStatus=(lossLocked||limitLocked)?"Novas entradas pausadas por limite diário":"Sincronizado — "+IntegerToString(ArraySize(masters))+" posição(ões) da conta-mãe";
 }
 int OnInit(){
  if(StringFind(ApiUrl,"https://")!=0||StringLen(License)!=43||ExpectedAccount==0||ExpectedServer==""||AccountInfoInteger(ACCOUNT_LOGIN)!=ExpectedAccount||AccountInfoString(ACCOUNT_SERVER)!=ExpectedServer||!SymbolSelect(GoldSymbol,true))return INIT_PARAMETERS_INCORRECT;
@@ -263,8 +265,8 @@ void OnDeinit(const int reason){EventKillTimer();}
 void OnTimer(){
  string today=TokyoDay();
  if(today!=dayKey){dayKey=today;openingEquity=AccountInfoDouble(ACCOUNT_EQUITY);lossLocked=false;}
- double equity=AccountInfoDouble(ACCOUNT_EQUITY),loss=openingEquity>0?(openingEquity-equity)*100.0/openingEquity:0;
- if(loss>=LocalDailyLossPercent)lossLocked=true;
+ double equity=AccountInfoDouble(ACCOUNT_EQUITY);currentDailyLoss=openingEquity>0?(openingEquity-equity)*100.0/openingEquity:0;
+ if(currentDailyLoss>=LocalDailyLossPercent)lossLocked=true;
  PollAndCopy();
- Comment("TOKAI COPY\n"+lastStatus+"\nPerda diária: "+DoubleToString(MathMax(0,loss),2)+"%"+(lossLocked?" — novas entradas pausadas":""));
+ Comment("TOKAI COPY\n"+lastStatus+"\nPerda diária: "+DoubleToString(MathMax(0,currentDailyLoss),2)+"%"+(lossLocked?" — novas entradas pausadas":""));
 }
