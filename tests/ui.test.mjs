@@ -14,7 +14,7 @@ test('leitor vê somente quatro áreas; páginas administrativas e futuras ficam
   vm.runInContext(`page='${page}';render();`,context);assert.equal(vm.runInContext('page',context),'home');
  }
  vm.runInContext("identity={role:'admin'};page='users';adminUsers=[{id:'1',display_name:'<img src=x onerror=alert(1)>',username:'test',status:'active'}];render();",context);
- assert(root.innerHTML.includes('Convidar usuário'));assert(!root.innerHTML.includes('<img src=x'));assert(root.innerHTML.includes('&lt;img'));
+ assert(root.innerHTML.includes('Novo convite'));assert(!root.innerHTML.includes('<img src=x'));assert(root.innerHTML.includes('&lt;img'));
 });
 test('convite abre ativação sem substituir window.history',()=>{
  const root={innerHTML:''},element={addEventListener(){},setAttribute(){}};let replaced=false;
