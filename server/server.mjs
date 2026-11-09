@@ -277,10 +277,10 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     return send(200,{ok:true,execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD'});
    }
    if(await auth.route(req,send,isAdmin,token))return;
-   let monitorId=null;
+   let monitorId=null,operator=null;
    if(ingestion&&!allowed(token,ingestToken)){
     const found=/^[A-Za-z0-9_-]{43}$/.test(token)?await db.auth.monitorByHash(createHash('sha256').update(token).digest('hex')):null;
-    if(!found)return send(401,{error:'Acesso não autorizado'});monitorId=found.id;
+    if(!found)return send(401,{error:'Acesso não autorizado'});monitorId=found.id;operator={id:found.id,name:found.name};
    }else if(!ingestion&&!user)return send(401,{error:'Acesso não autorizado'});
    const signalsPlan=isAdmin||['signals','signals_copy'].includes(user?.plan_code);
    if((req.url==='/v1/state'||req.url.startsWith('/v1/push'))&&user&&!signalsPlan)return send(403,{error:'Seu plano não inclui o painel de sinais.'});
@@ -290,6 +290,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const s=await readJson(req,2_000_000);validate(s,source);
     if(historyStart>0)s.deals=s.deals.filter(d=>Number(d.time)>=historyStart);
     if(monitorId)await db.auth.monitorSeen(monitorId,now());
+    s.operator=operator;
     if(!await db.save(s,now()))return send(409,{error:'Snapshot anterior ao estado atual'});
     void drain();return send(200,{ok:true});
    }

@@ -62,7 +62,7 @@ export function authRepository(query){
   pendingRegistration:id=>one("SELECT u.id,u.status,r.requested_plan,COALESCE(rp.payment_plan,'monthly') AS payment_plan FROM signal_users u JOIN signal_registrations r ON r.user_id=u.id LEFT JOIN signal_registration_payments rp ON rp.user_id=u.id WHERE u.id=$1",[id]),
   monitorList:async()=>(await query('SELECT id,name,created_at,revoked_at,last_seen_at FROM monitor_keys ORDER BY created_at DESC LIMIT 100',[])).rows,
   monitorCreate:m=>one('INSERT INTO monitor_keys(id,name,token_hash,created_at) VALUES($1,$2,$3,$4) RETURNING id,name,created_at',[m.id,m.name,m.hash,m.now]),
-  monitorByHash:hash=>one('SELECT id FROM monitor_keys WHERE token_hash=$1 AND revoked_at IS NULL',[hash]),
+  monitorByHash:hash=>one('SELECT id,name FROM monitor_keys WHERE token_hash=$1 AND revoked_at IS NULL',[hash]),
   monitorSeen:(id,now)=>query('UPDATE monitor_keys SET last_seen_at=$2 WHERE id=$1',[id,now]),
   monitorRevoke:(id,now)=>one('UPDATE monitor_keys SET revoked_at=$2 WHERE id=$1 AND revoked_at IS NULL RETURNING id',[id,now]),
   find:username=>one('SELECT * FROM signal_users WHERE username=$1',[username]),
