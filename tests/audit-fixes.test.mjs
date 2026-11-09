@@ -153,3 +153,16 @@ test('conta-mãe padrão do servidor dispensa o login no pacote',async()=>{
   assert.equal(r.s,existsSync(new URL('../mt5/TokaiMonitor.ex5',import.meta.url))?200:503);
  }finally{await close();}
 });
+
+test('novo pacote do mesmo computador revoga o anterior e a lista de nomes vem do servidor',async()=>{
+ const {rq,admin,close}=await setup({masterAccount:'41277672',teamNames:['ROBERTO – MIE','FULI – FUKUROI']});
+ try{
+  const {existsSync}=await import('node:fs');
+  assert.deepEqual((await rq('/v1/admin/monitors',admin)).d.team_names,['ROBERTO – MIE','FULI – FUKUROI']);
+  if(!existsSync(new URL('../mt5/TokaiMonitor.ex5',import.meta.url)))return;
+  assert.equal((await rq('/v1/admin/monitors/package',admin,{name:'ROBERTO – MIE'})).s,200);
+  assert.equal((await rq('/v1/admin/monitors/package',admin,{name:'ROBERTO – MIE'})).s,200);
+  const list=(await rq('/v1/admin/monitors',admin)).d.monitors;
+  assert.equal(list.length,2);assert.equal(list.filter(m=>!m.revoked_at).length,1);
+ }finally{await close();}
+});
