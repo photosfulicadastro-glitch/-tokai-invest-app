@@ -43,6 +43,14 @@ CREATE TABLE IF NOT EXISTS monitor_keys (
  revoked_at BIGINT,
  last_seen_at BIGINT
 );
+CREATE TABLE IF NOT EXISTS copy_links (
+ id TEXT PRIMARY KEY,
+ token_hash TEXT NOT NULL UNIQUE,
+ agent_id TEXT NOT NULL,
+ created_at BIGINT NOT NULL,
+ expires_at BIGINT NOT NULL,
+ used_at BIGINT
+);
 CREATE TABLE IF NOT EXISTS monitor_links (
  id TEXT PRIMARY KEY,
  token_hash TEXT NOT NULL UNIQUE,
@@ -72,6 +80,9 @@ export function authRepository(query){
   monitorList:async()=>(await query('SELECT id,name,created_at,revoked_at,last_seen_at FROM monitor_keys ORDER BY created_at DESC LIMIT 100',[])).rows,
   monitorCreate:m=>one('INSERT INTO monitor_keys(id,name,token_hash,created_at) VALUES($1,$2,$3,$4) RETURNING id,name,created_at',[m.id,m.name,m.hash,m.now]),
   monitorByHash:hash=>one('SELECT id,name FROM monitor_keys WHERE token_hash=$1 AND revoked_at IS NULL',[hash]),
+  copyLinkCreate:l=>query('INSERT INTO copy_links(id,token_hash,agent_id,created_at,expires_at) VALUES($1,$2,$3,$4,$5)',[l.id,l.hash,l.agentId,l.now,l.expires]),
+  copyLinkPeek:(hash,now)=>one('SELECT agent_id FROM copy_links WHERE token_hash=$1 AND used_at IS NULL AND expires_at>$2',[hash,now]),
+  copyLinkConsume:(hash,now)=>one('UPDATE copy_links SET used_at=$2 WHERE token_hash=$1 AND used_at IS NULL AND expires_at>$2 RETURNING agent_id',[hash,now]),
   linkCreate:l=>query('INSERT INTO monitor_links(id,token_hash,name,account,created_at,expires_at) VALUES($1,$2,$3,$4,$5,$6)',[l.id,l.hash,l.name,l.account,l.now,l.expires]),
   linkPeek:(hash,now)=>one('SELECT name FROM monitor_links WHERE token_hash=$1 AND used_at IS NULL AND expires_at>$2',[hash,now]),
   linkConsume:(hash,now)=>one('UPDATE monitor_links SET used_at=$2 WHERE token_hash=$1 AND used_at IS NULL AND expires_at>$2 RETURNING name,account',[hash,now]),
