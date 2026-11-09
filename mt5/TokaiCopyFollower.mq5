@@ -1,5 +1,5 @@
 #property strict
-#property version "1.21"
+#property version "1.22"
 // TOKAI COPY FOLLOWER
 // A conta da corretora permanece local no MT5. A licença é vinculada a uma única conta e instalação.
 // V1: XAUUSD em contas MT5 com modo hedging. A API deve estar liberada em Ferramentas > Opções > Expert Advisors.
@@ -15,7 +15,7 @@ input double VolumeMultiplier=1.0;
 input long TokaiMagic=41277716;
 input int MaxSlippagePoints=30;
 input int MasterMaxAgeSeconds=30;
-input int PollSeconds=1; // Consulta a conta-mãe a cada 1 segundo (mínimo 1, máximo 5).
+input int PollSeconds=1; // Consulta a conta-mãe a cada N segundos (mínimo 1, máximo 5).
 
 struct MasterPosition{
  string id;
@@ -37,6 +37,19 @@ string Esc(string value){StringReplace(value,"\\","\\\\");StringReplace(value,"\
 string Fingerprint(){return IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+"|"+AccountInfoString(ACCOUNT_SERVER)+"|"+TerminalInfoString(TERMINAL_DATA_PATH);}
 string TokyoDay(){datetime t=TimeGMT()+9*3600;return TimeToString(t,TIME_DATE);}
 string CommentFor(string masterId){return "TK:"+masterId;}
+// Estado persistido no terminal (GlobalVariable sobrevive a reinício do EA/MT5/VPS).
+string GV(string name){return "TKC_"+IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+"_"+name;}
+string CopiedKey(string masterId){return GV("c_"+masterId);}
+bool WasCopied(string masterId){return GlobalVariableCheck(CopiedKey(masterId));}
+void MarkCopied(string masterId){GlobalVariableSet(CopiedKey(masterId),(double)TimeCurrent());}
+// Carrega (ou cria) a equity de abertura do dia de Tóquio e o bloqueio do dia.
+void LoadDay(){
+ string openKey=GV("open_"+dayKey),lockKey=GV("lock_"+dayKey);
+ if(GlobalVariableCheck(openKey))openingEquity=GlobalVariableGet(openKey);
+ else{openingEquity=AccountInfoDouble(ACCOUNT_EQUITY);GlobalVariableSet(openKey,openingEquity);}
+ lossLocked=GlobalVariableCheck(lockKey);
+}
+void LockDay(){lossLocked=true;GlobalVariableSet(GV("lock_"+dayKey),1.0);}
 bool IsTokaiComment(string comment){return StringFind(comment,"TK:")==0;}
 string MasterIdFromComment(string comment){return StringSubstr(comment,3);}
 
@@ -135,6 +148,15 @@ bool IsMasterPresent(MasterPosition &positions[],string id){
  for(int i=0;i<ArraySize(positions);i++)if(positions[i].id==id)return true;
  return false;
 }
+// Remove marcas de ids que já não existem na conta-mãe.
+void ForgetRemoved(MasterPosition &masters[]){
+ string prefix=GV("c_");
+ for(int i=GlobalVariablesTotal()-1;i>=0;i--){
+  string name=GlobalVariableName(i);
+  if(StringFind(name,prefix)!=0)continue;
+  if(!IsMasterPresent(masters,StringSubstr(name,StringLen(prefix))))GlobalVariableDel(name);
+ }
+}
 bool AccountIsAllowed(string mode){
  ENUM_ACCOUNT_TRADE_MODE accountMode=(ENUM_ACCOUNT_TRADE_MODE)AccountInfoInteger(ACCOUNT_TRADE_MODE);
  if(mode=="both")return accountMode==ACCOUNT_TRADE_MODE_DEMO||accountMode==ACCOUNT_TRADE_MODE_REAL;
@@ -183,6 +205,7 @@ bool OpenForMaster(MasterPosition &master,double volume){
  if(volume<=0)return false;
  bool sent=master.side=="BUY"?trade.Buy(volume,GoldSymbol,0,master.sl,master.tp,CommentFor(master.id)):trade.Sell(volume,GoldSymbol,0,master.sl,master.tp,CommentFor(master.id));
  if(!sent||!TradeResultOk()){string message="Falha ao abrir: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message," ",master.id);ReportError(message,master.id);return false;}
+ MarkCopied(master.id);
  Report("opened",(master.side=="BUY"?"Compra":"Venda")+" copiada",master.id,TicketText(trade.ResultDeal()));
  return true;
 }
@@ -245,6 +268,8 @@ void SyncPositions(MasterPosition &masters[],bool allowNewEntries){
   }
   double current=PositionVolumeFor(master.id);
   if(current<=0){
+   // Já copiada antes e hoje sem posição local (SL/TP local ou fechamento manual): não reabrir.
+   if(WasCopied(master.id)){SetStatus("Posição "+master.id+" já copiada e encerrada localmente; não será reaberta");continue;}
    if(allowNewEntries)OpenForMaster(master,wanted);
    continue;
   }
@@ -254,6 +279,7 @@ void SyncPositions(MasterPosition &masters[],bool allowNewEntries){
   if(current<wanted-step/2&&allowNewEntries)OpenForMaster(master,wanted-current);
  }
  CloseRemoved(masters);
+ ForgetRemoved(masters);
 }
 void PollAndCopy(){
  string response,payload="{\"license\":\""+Esc(License)+"\",\"account\":\""+IntegerToString((int)AccountInfoInteger(ACCOUNT_LOGIN))+"\",\"server\":\""+Esc(AccountInfoString(ACCOUNT_SERVER))+"\",\"fingerprint\":\""+Esc(fingerprint)+"\",\"equity\":"+DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY),2)+"}";
@@ -275,18 +301,18 @@ int OnInit(){
  if(StringFind(ApiUrl,"https://")!=0||StringLen(License)!=43||ExpectedAccount==0||ExpectedServer==""||AccountInfoInteger(ACCOUNT_LOGIN)!=ExpectedAccount||AccountInfoString(ACCOUNT_SERVER)!=ExpectedServer||!SymbolSelect(GoldSymbol,true))return INIT_PARAMETERS_INCORRECT;
  if((ENUM_ACCOUNT_MARGIN_MODE)AccountInfoInteger(ACCOUNT_MARGIN_MODE)!=ACCOUNT_MARGIN_MODE_RETAIL_HEDGING){Print("TOKAI COPY requer conta MT5 em modo hedging.");return INIT_PARAMETERS_INCORRECT;}
  if(!TerminalInfoInteger(TERMINAL_TRADE_ALLOWED)||!MQLInfoInteger(MQL_TRADE_ALLOWED)||!AccountInfoInteger(ACCOUNT_TRADE_EXPERT)){Print("TOKAI COPY: negociação algorítmica não permitida.");return INIT_FAILED;}
- fingerprint=Fingerprint();dayKey=TokyoDay();openingEquity=AccountInfoDouble(ACCOUNT_EQUITY);
+ fingerprint=Fingerprint();dayKey=TokyoDay();LoadDay();
  trade.SetExpertMagicNumber((ulong)TokaiMagic);trade.SetDeviationInPoints((ulong)MaxSlippagePoints);trade.SetTypeFillingBySymbol(GoldSymbol);
  activated=Activate();if(!activated){Print("TOKAI COPY: ativação recusada.");return INIT_FAILED;}
  Report("activated","Licença ativada para esta instalação","","");
- EventSetTimer(2);lastStatus="Ativado; aguardando plano";return INIT_SUCCEEDED;
+ EventSetTimer(MathMax(1,MathMin(5,PollSeconds)));lastStatus="Ativado; aguardando plano";return INIT_SUCCEEDED;
 }
 void OnDeinit(const int reason){EventKillTimer();}
 void OnTimer(){
  string today=TokyoDay();
- if(today!=dayKey){dayKey=today;openingEquity=AccountInfoDouble(ACCOUNT_EQUITY);lossLocked=false;}
+ if(today!=dayKey){dayKey=today;LoadDay();}
  double equity=AccountInfoDouble(ACCOUNT_EQUITY);currentDailyLoss=openingEquity>0?(openingEquity-equity)*100.0/openingEquity:0;
- if(currentDailyLoss>=LocalDailyLossPercent)lossLocked=true;
+ if(currentDailyLoss>=LocalDailyLossPercent&&!lossLocked)LockDay();
  PollAndCopy();
  Comment("TOKAI COPY\n"+lastStatus+"\nPerda diária: "+DoubleToString(MathMax(0,currentDailyLoss),2)+"%"+(lossLocked?" — novas entradas pausadas":""));
 }

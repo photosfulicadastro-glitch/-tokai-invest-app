@@ -41,18 +41,18 @@ async function installerZip({license,agent,origin}){
   '4. Em Ferramentas > Opções > Expert Advisors, adicione https://sinais.tokaiinvest.jp à lista de WebRequest permitido.',
   '5. Na aba Inputs do EA, use Carregar e selecione TokaiCopyFollower.set deste pacote.',
   '6. Ative Permitir negociação algorítmica quando o modo global do Copy autorizar esta conta.',
-  '7. A configuração padrão consulta a conta-mãe a cada 1 segundo.',
+  '7. A configuração padrão consulta a conta-mãe a cada 1 segundo (PollSeconds).',
   '',
   'A senha da corretora nunca é solicitada nem enviada pela Tokai.',
   'Este EA exige conta MT5 em modo hedging; contas netting não são compatíveis.',
-  'O limite diário é aplicado pelo servidor e pelo EA; ele pausa somente novas entradas copiadas.',
+  'O limite diário é aplicado pelo EA (base de equity do dia, fuso do Japão, mantida após reiniciar o MT5); ele pausa somente novas entradas copiadas.',
   ''
  ].join('\r\n');
  const executable=await readFile(new URL('../mt5/TokaiCopyFollower.ex5',import.meta.url));
  return zip([{name:'TokaiCopyFollower.ex5',body:executable},{name:'TokaiCopyFollower.set',body:settings},{name:'LEIA-ME.txt',body:readme}]);
 }
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
-const copyServiceActive=(entry,time)=>entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
+const copyServiceActive=(entry,time)=>entry?.user_status==='active'&&entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
 const copyAccessUntil=value=>{if(value===null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;const time=Date.parse(value+'T14:59:59.999Z');return Number.isSafeInteger(time)&&time>0?time:undefined;};
 export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
@@ -125,6 +125,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(typeof b.user_id!=='string'||!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120||!Number.isFinite(loss)||loss<=0||loss>100)return send(400,{error:'Dados do agente inválidos.'});
     const settings=await db.copy.settings();if(loss>settings.max_daily_loss_percent)return send(400,{error:'O limite do aluno não pode superar o teto da Tokai.'});
     if(!await db.copy.copyAccess(b.user_id,now()))return send(400,{error:'Ative primeiro a assinatura Copy deste aluno.'});
+    const taken=await db.copy.agentByAccount(account,server);if(taken&&taken.user_id!==b.user_id)return send(409,{error:'Esta conta MT5 já está vinculada a outro aluno.'});
     const agentToken=randomBytes(32).toString('base64url');const agent=await db.copy.createAgent({id:randomUUID(),userId:b.user_id,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(agentToken).digest('hex'),dailyLossPercent:loss,now:now()});
     if(!agent)return send(409,{error:'Este aluno já possui agente Copy configurado.'});
     return send(201,{agent,token:agentToken});
@@ -146,7 +147,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    if(req.url==='/v1/copy/installer'&&req.method==='POST'){
     if(!user||isAdmin||!['copy','signals_copy'].includes(user.plan_code))return send(403,{error:'Plano Copy necessário.'});
     const time=now(),[membership,agent,termsAccepted]=await Promise.all([db.copy.copyMembership(user.id),db.copy.agentForUser(user.id),db.auth.termsAccepted(user.id,TERMS_VERSION)]);
-    if(!copyServiceActive({membership_status:membership?.status,membership_access_until:membership?.access_until},time))return send(403,{error:'Sua assinatura Copy está pausada ou expirada.'});
+    if(!copyServiceActive({user_status:'active',membership_status:membership?.status,membership_access_until:membership?.access_until},time))return send(403,{error:'Sua assinatura Copy está pausada ou expirada.'});
     if(!termsAccepted)return send(403,{error:'Aceite o Termo de Ciência de Riscos antes de baixar.'});
     if(!agent)return send(409,{error:'Sua conta MT5 ainda não foi vinculada pela equipe Tokai.'});
     const current=await db.copy.currentLicenseForAgent(agent.id);
@@ -162,7 +163,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!user||isAdmin)return send(403,{error:'Acesso de aluno necessário.'});
     const b=await readJson(req),loss=Number(b.daily_loss_percent),time=now();
     const [membership,agent,settings]=await Promise.all([db.copy.copyMembership(user.id),db.copy.agentForUser(user.id),db.copy.settings()]);
-    if(!copyServiceActive({membership_status:membership?.status,membership_access_until:membership?.access_until},time))return send(403,{error:'Assinatura Copy indisponível.'});
+    if(!copyServiceActive({user_status:'active',membership_status:membership?.status,membership_access_until:membership?.access_until},time))return send(403,{error:'Assinatura Copy indisponível.'});
     if(!agent)return send(400,{error:'Sua conta MT5 ainda não foi cadastrada.'});
     const maximum=Math.min(Number(agent.daily_loss_percent),Number(settings.max_daily_loss_percent));
     if(!Number.isFinite(loss)||loss<=0||loss>maximum)return send(400,{error:'Você pode apenas reduzir seu limite, até '+maximum+'%.'});
@@ -183,6 +184,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200||!Number.isFinite(equity)||equity<=0||!['activated','status','opened','modified','reduced','closed','blocked','error'].includes(eventType)||message.length<1||message.length>280||(masterPositionId!==null&&!/^[0-9]{1,20}$/.test(masterPositionId))||(copiedTicket!==null&&!/^[0-9]{1,20}$/.test(copiedTicket)))return send(400,{error:'Relatório de agente inválido.'});
     const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
     if(!entry||entry.status!=='active'||entry.expected_account!==account||entry.broker_server!==serverName||entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Agente não autorizado.'});
+    if(entry.user_status!=='active')return send(403,{error:'Agente não autorizado.'});
     const time=now(),status=eventType==='error'?'error':eventType==='blocked'?'blocked':'connected';
     await db.copy.recordEvent({id:randomUUID(),agentId:entry.agent_id,licenseId:entry.id,eventType,masterPositionId,copiedTicket,message,now:time});
     await db.copy.heartbeat({id:entry.agent_id,status,equity,error:eventType==='error'?message:null,now:time});
@@ -201,6 +203,8 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    }
    if(await auth.route(req,send,isAdmin,token))return;
    if(ingestion?!allowed(token,ingestToken):!user)return send(401,{error:'Acesso não autorizado'});
+   const signalsPlan=isAdmin||['signals','signals_copy'].includes(user?.plan_code);
+   if((req.url==='/v1/state'||req.url.startsWith('/v1/push'))&&user&&!signalsPlan)return send(403,{error:'Seu plano não inclui o painel de sinais.'});
    if(await (await pushReady).route(req,send,user))return;
    if(req.url==='/v1/me'&&req.method==='GET')return send(200,{user});
    if(ingestion){
