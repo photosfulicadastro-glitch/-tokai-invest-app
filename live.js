@@ -406,7 +406,7 @@ async function refresh(force=true){
 // One request at a time; hidden tabs stop polling. Offline/error retries stay at 1s.
 let nextRefreshAt=0;
 setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}},500);
-document.addEventListener('focusin',e=>{if(e.target?.tagName==='SELECT')selectHold=true;});document.addEventListener('change',e=>{if(e.target?.tagName==='SELECT')selectHold=false;},true);document.addEventListener('focusout',e=>{if(e.target?.tagName==='SELECT'){selectHold=false;setTimeout(render,80);}});
+document.addEventListener('focusin',e=>{if(e.target?.tagName==='SELECT')selectHold=true;});document.addEventListener('change',e=>{if(e.target?.tagName==='SELECT')selectHold=false;},true);document.addEventListener('focusout',e=>{if(e.target?.tagName==='SELECT'){selectHold=false;if(token&&identity&&data)setTimeout(render,80);}});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&chartExpanded&&window.innerWidth>650){chartExpanded=false;render();}else if(document.fullscreenElement&&chartExpanded){setTimeout(render,120);}});document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});let chartOrientationTimer;if(typeof window.addEventListener==='function')window.addEventListener('resize',()=>{if(chartExpanded||page==='market'||page==='home'){clearTimeout(chartOrientationTimer);chartOrientationTimer=setTimeout(render,120);}});
 if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class="empty">Verificando acesso…</div>';refresh();}else login();
 
