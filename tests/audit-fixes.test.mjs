@@ -20,7 +20,7 @@ async function setup(){
   return {token:act.d.token,user,agent,created};
  };
  const close=async()=>{await new Promise(r=>server.close(r));rmSync(dir,{recursive:true});};
- return {rq,admin,ingest,member,close};
+ return {rq,admin,ingest,member,storage,close};
 }
 const licenseFrom=zip=>zip.toString('latin1').match(/License=([A-Za-z0-9_-]{43})/)[1];
 
@@ -57,5 +57,26 @@ test('a mesma conta MT5 não pode ser vinculada a dois alunos',async()=>{
  try{
   const a=await member('aluno.a','copy','44444444');assert.equal(a.created.s,201);
   const b=await member('aluno.b','copy','44444444');assert.equal(b.created.s,409);
+ }finally{await close();}
+});
+
+test('cadastro com plano de pagamento pré-cria o agente Copy e a aprovação libera tudo', async()=>{
+ const {rq,admin,storage,close}=await setup();
+ try{
+  const base={name:'Aluno Pago',username:'aluno.pago',password:PASSWORD,plan:'signals_copy',mt5_account:'41277716',broker_server:'Exness-MT5Trial3',terms_accepted:true,terms_version:TERMS};
+  assert.equal((await rq('/v1/auth/register','',{...base,payment_plan:'bogus'})).s,400);
+  assert.equal((await rq('/v1/auth/register','',{...base,payment_plan:'quarterly'})).s,202);
+  assert.equal((await rq('/v1/auth/register','',{...base,username:'outro.aluno',payment_plan:'monthly'})).s,409);
+  const user=await storage.auth.find('aluno.pago');
+  const listed=(await rq('/v1/admin/users',admin)).d.users.find(u=>u.id===user.id);
+  assert.equal(listed.payment_plan,'quarterly');assert.equal(listed.status,'pending');
+  const agents=(await rq('/v1/admin/copy/overview',admin)).d;
+  const row=(agents.agents||agents.students||[]).find(x=>x.user?.id===user.id);
+  assert.equal(Number(row.agent.daily_loss_percent),10);assert.equal(row.agent.expected_account,'41277716');
+  assert.equal((await rq('/v1/auth/login','',{username:'aluno.pago',password:PASSWORD})).s,401);
+  const ok=await rq('/v1/admin/approve',admin,{id:user.id});assert.equal(ok.s,200);
+  const days=(ok.d.access_until-Date.now())/864e5;assert.ok(days>89&&days<91.1);
+  assert.equal((await rq('/v1/auth/login','',{username:'aluno.pago',password:PASSWORD})).s,200);
+  assert.equal((await rq('/v1/admin/approve',admin,{id:user.id})).s,409);
  }finally{await close();}
 });
