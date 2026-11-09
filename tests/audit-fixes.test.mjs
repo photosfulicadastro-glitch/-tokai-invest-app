@@ -123,3 +123,23 @@ test('pacote do monitor valida entrada, exige admin e gera chave que funciona',a
   else{assert.equal(r.s,200);assert.equal((await rq('/v1/admin/monitors',admin)).d.monitors.length,1);}
  }finally{await close();}
 });
+
+test('operações ficam marcadas com o computador que as enviou primeiro',async()=>{
+ const {rq,admin,ingest,close}=await setup();
+ try{
+  const deal=(id,time)=>({id,position_id:id,side:'BUY',entry:1,time,volume:0.01,price:1,profit:1,commission:0,swap:0,fee:0});
+  const snap=deals=>({source:'principal',observed_at:Math.floor(Date.now()/1000),symbol:'XAUUSD',currency:'USD',bid:1,ask:1,positions:[],deals});
+  const t=Math.floor(Date.now()/1000)-100;
+  const a=(await rq('/v1/admin/monitors',admin,{name:'FULI – FUKUROI'})).d.key,b=(await rq('/v1/admin/monitors',admin,{name:'ROBERTO – MIE'})).d.key;
+  assert.equal((await rq('/v1/snapshot',ingest,snap([deal('1',t-50)]))).s,200);
+  assert.equal((await rq('/v1/snapshot',a,snap([deal('2',t-40)]))).s,200);
+  // Roberto liga depois e reenvia o histórico (inclui a operação do Fuli) mais uma nova dele
+  assert.equal((await rq('/v1/snapshot',b,snap([deal('1',t-50),deal('2',t-40),deal('3',t-10)]))).s,200);
+  const st=(await rq('/v1/state',admin)).d;
+  const by=Object.fromEntries(st.deals.map(d=>[d.id,d.operator?.name??null]));
+  assert.equal(by['1'],null);
+  assert.equal(by['2'],'FULI – FUKUROI');
+  assert.equal(by['3'],'ROBERTO – MIE');
+  assert.equal(st.state.operator.name,'ROBERTO – MIE');
+ }finally{await close();}
+});
