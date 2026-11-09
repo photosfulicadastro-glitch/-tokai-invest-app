@@ -11,6 +11,8 @@ const crc32=data=>{let crc=0xffffffff;for(const byte of data){crc^=byte;for(let 
 // Arquivo ZIP sem compressão para não depender de bibliotecas externas no servidor.
 const zip=entries=>{let offset=0;const local=[],central=[];for(const entry of entries){const name=Buffer.from(entry.name,'utf8'),body=Buffer.isBuffer(entry.body)?entry.body:Buffer.from(entry.body,'utf8'),sum=crc32(body);const part=Buffer.concat([Buffer.from([0x50,0x4b,0x03,0x04]),u16(20),u16(0x800),u16(0),u16(0),u16(0),u32(sum),u32(body.length),u32(body.length),u16(name.length),u16(0),name,body]);local.push(part);central.push(Buffer.concat([Buffer.from([0x50,0x4b,0x01,0x02]),u16(20),u16(20),u16(0x800),u16(0),u16(0),u16(0),u32(sum),u32(body.length),u32(body.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]));offset+=part.length;}const directory=Buffer.concat(central),end=Buffer.concat([Buffer.from([0x50,0x4b,0x05,0x06]),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(directory.length),u32(offset),u16(0)]);return Buffer.concat([...local,directory,end]);};
 const cleanSetValue=value=>String(value??'').replace(/[\r\n]/g,'').trim();
+const zipName=name=>'tokai-monitor-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)+'.zip';
+const esc=v=>String(v).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
 async function monitorZip({key,name,account,origin}){
  const executable=await readFile(new URL('../mt5/TokaiMonitor.ex5',import.meta.url));
  const settings=[
@@ -109,6 +111,27 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   if(req.headers.origin&&req.headers.origin!==origin)return send(403,{error:'Origem não permitida'});
   if(req.method==='OPTIONS')return send(204,{});
   if(req.url==='/health'&&req.method==='GET'){try{await db.health();return send(200,{ok:true});}catch{return send(503,{ok:false});}}
+  const dl=/^\/v1\/monitor\/download\/([A-Za-z0-9_-]{43})$/.exec((req.url||'').split('?')[0]);
+  if(dl){
+   const hash=createHash('sha256').update(dl[1]).digest('hex');
+   const html=(status,title,body,extra='')=>{res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"});res.end('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>TOKAI INVEST</title><style>body{font-family:system-ui,sans-serif;background:#0b1b2d;color:#e8eef5;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}main{max-width:460px;background:#10253b;border:1px solid #223348;border-radius:14px;padding:26px}h1{font-size:1.2rem;margin:0 0 10px}p{line-height:1.5;color:#b8c7d6}button{background:#f0b429;border:0;border-radius:10px;padding:12px 18px;font-weight:700;font-size:1rem;cursor:pointer}</style></head><body><main><h1>'+title+'</h1>'+body+extra+'</main></body></html>');};
+   if(req.method==='GET'){
+    const link=await db.auth.linkPeek(hash,now());
+    if(!link)return html(410,'Link expirado ou já usado','<p>Peça um novo link para quem enviou este.</p>');
+    return html(200,'Monitor TOKAI — '+esc(link.name),'<p>Este link funciona <b>uma única vez</b> e vale por 24 horas. Clique abaixo para baixar o pacote e siga o arquivo LEIA-ME.txt que vem dentro.</p>','<form method="post"><button type="submit">Baixar pacote do monitor</button></form>');
+   }
+   if(req.method==='POST'){
+    try{await access(new URL('../mt5/TokaiMonitor.ex5',import.meta.url));}catch{return html(503,'Indisponível agora','<p>Tente novamente em alguns minutos.</p>');}
+    const used=await db.auth.linkConsume(hash,now());
+    if(!used)return html(410,'Link expirado ou já usado','<p>Peça um novo link para quem enviou este.</p>');
+    const key=randomBytes(32).toString('base64url');
+    const created=await db.auth.monitorCreate({id:randomUUID(),name:used.name,hash:createHash('sha256').update(key).digest('hex'),now:now()});
+    for(const old of await db.auth.monitorList())if(old.name===used.name&&!old.revoked_at&&old.id!==created.id)await db.auth.monitorRevoke(old.id,now());
+    const bundle=await monitorZip({key,name:used.name,account:used.account,origin});
+    return sendZip(zipName(used.name),bundle);
+   }
+   return html(405,'Método não permitido','');
+  }
   const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   const ingestion=req.url==='/v1/snapshot'&&req.method==='POST';
   try{
@@ -142,7 +165,16 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const created=await db.auth.monitorCreate({id:randomUUID(),name,hash:createHash('sha256').update(key).digest('hex'),now:now()});
     for(const old of await db.auth.monitorList())if(old.name===name&&!old.revoked_at&&old.id!==created.id)await db.auth.monitorRevoke(old.id,now());
     const bundle=await monitorZip({key,name,account,origin});
-    return sendZip('tokai-monitor-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)+'.zip',bundle);
+    return sendZip(zipName(name),bundle);
+   }
+   if(req.url==='/v1/admin/monitors/link'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req),name=typeof b.name==='string'?b.name.trim():'',account=String(b.account||masterAccount||'').trim();
+    if(!name||name.length>80)return send(400,{error:'Informe um nome de até 80 caracteres para o computador.'});
+    if(!/^[0-9]{3,12}$/.test(account))return send(400,{error:'Informe o login numérico da conta-mãe MT5.'});
+    const token=randomBytes(32).toString('base64url'),expires=now()+24*60*60*1000;
+    await db.auth.linkCreate({id:randomUUID(),hash:createHash('sha256').update(token).digest('hex'),name,account,now:now(),expires});
+    return send(201,{url:origin.replace(/\/$/,'')+'/api/v1/monitor/download/'+token,expires_at:expires});
    }
    if(req.url==='/v1/admin/monitors/revoke'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});

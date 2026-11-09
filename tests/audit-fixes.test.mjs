@@ -20,7 +20,7 @@ async function setup(opts={}){
   return {token:act.d.token,user,agent,created};
  };
  const close=async()=>{await new Promise(r=>server.close(r));rmSync(dir,{recursive:true});};
- return {rq,admin,ingest,member,storage,close};
+ return {rq,admin,ingest,member,storage,close,base};
 }
 const licenseFrom=zip=>zip.toString('latin1').match(/License=([A-Za-z0-9_-]{43})/)[1];
 
@@ -164,5 +164,31 @@ test('novo pacote do mesmo computador revoga o anterior e a lista de nomes vem d
   assert.equal((await rq('/v1/admin/monitors/package',admin,{name:'ROBERTO – MIE'})).s,200);
   const list=(await rq('/v1/admin/monitors',admin)).d.monitors;
   assert.equal(list.length,2);assert.equal(list.filter(m=>!m.revoked_at).length,1);
+ }finally{await close();}
+});
+
+test('link de download do monitor é de uso único, expira e não precisa de login',async()=>{
+ const {existsSync}=await import('node:fs');
+ let t=Date.now();
+ const {rq,admin,close,base}=await setup({masterAccount:'41277672',now:()=>t});
+ try{
+  assert.equal((await rq('/v1/admin/monitors/link','',{name:'P1'})).s,403);
+  assert.equal((await rq('/v1/admin/monitors/link',admin,{name:''})).s,400);
+  const made=await rq('/v1/admin/monitors/link',admin,{name:'EDU – SUZUKA'});assert.equal(made.s,201);
+  const path=new URL(made.d.url).pathname.replace(/^\/api/,'');
+  // pré-visualização (GET) não consome
+  const g1=await fetch(base+path);assert.equal(g1.status,200);assert.match(await g1.text(),/Baixar pacote do monitor/);
+  const g2=await fetch(base+path);assert.equal(g2.status,200);
+  if(existsSync(new URL('../mt5/TokaiMonitor.ex5',import.meta.url))){
+   const p1=await fetch(base+path,{method:'POST'});assert.equal(p1.status,200);assert.equal(p1.headers.get('content-type'),'application/zip');
+   const p2=await fetch(base+path,{method:'POST'});assert.equal(p2.status,410);
+   const list=(await rq('/v1/admin/monitors',admin)).d.monitors;assert.equal(list.filter(m=>m.name==='EDU – SUZUKA'&&!m.revoked_at).length,1);
+  }
+  // expirado
+  const made2=await rq('/v1/admin/monitors/link',admin,{name:'MARCOS – NAGANO'});const path2=new URL(made2.d.url).pathname.replace(/^\/api/,'');
+  t+=25*60*60*1000;
+  assert.equal((await fetch(base+path2)).status,410);
+  assert.equal((await fetch(base+path2,{method:'POST'})).status,410);
+  assert.equal((await fetch(base+'/v1/monitor/download/'+'x'.repeat(43))).status,410);
  }finally{await close();}
 });
