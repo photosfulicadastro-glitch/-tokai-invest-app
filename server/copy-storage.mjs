@@ -31,6 +31,10 @@ CREATE TABLE IF NOT EXISTS copy_memberships (
  updated_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS copy_memberships_status ON copy_memberships(status);
+CREATE TABLE IF NOT EXISTS copy_close_requests (
+ agent_id TEXT PRIMARY KEY,
+ requested_at BIGINT NOT NULL
+);
 CREATE TABLE IF NOT EXISTS copy_licenses (
  id TEXT PRIMARY KEY,
  agent_id TEXT NOT NULL REFERENCES copy_agents(id),
@@ -78,6 +82,9 @@ export function copyRepository(query){
   license:hash=>one("SELECT l.*,a.expected_account,a.broker_server,a.status AS agent_status,a.user_id,u.status AS user_status,a.daily_loss_percent,m.status AS membership_status,m.access_until AS membership_access_until FROM copy_licenses l JOIN copy_agents a ON a.id=l.agent_id JOIN signal_users u ON u.id=a.user_id LEFT JOIN copy_memberships m ON m.user_id=a.user_id WHERE l.license_hash=$1",[hash]),
   activateLicense:({id,fingerprint,now})=>one("UPDATE copy_licenses SET status='active',activated_at=$1,terminal_fingerprint=$2,last_seen_at=$1 WHERE id=$3 AND status='issued' RETURNING id,status,activated_at",[now,fingerprint,id]),
   revokeLicenses:async({agentId,now})=>{await query("UPDATE copy_licenses SET status='revoked',revoked_at=$1 WHERE agent_id=$2 AND status IN ('issued','active')",[now,agentId]);return true;},
+  requestCloseAll:(agentId,now)=>one('INSERT INTO copy_close_requests(agent_id,requested_at) VALUES($1,$2) ON CONFLICT(agent_id) DO UPDATE SET requested_at=excluded.requested_at RETURNING agent_id',[agentId,now]),
+  closeRequested:async agentId=>!!(await one('SELECT agent_id FROM copy_close_requests WHERE agent_id=$1',[agentId])),
+  clearCloseRequest:agentId=>query('DELETE FROM copy_close_requests WHERE agent_id=$1',[agentId]),
   heartbeat:({id,status,equity,error,now})=>one('UPDATE copy_agents SET status=$1,last_equity=$2,last_error=$3,last_seen_at=$4,updated_at=$4 WHERE id=$5 RETURNING id',[status,equity,error,now,id]),
   recordEvent:e=>one('INSERT INTO copy_agent_events(id,agent_id,license_id,event_type,master_position_id,copied_ticket,message,created_at) VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING id,agent_id,event_type,master_position_id,copied_ticket,message,created_at',[e.id,e.agentId,e.licenseId,e.eventType,e.masterPositionId||null,e.copiedTicket||null,e.message,e.now]),
   recentEvents:async(limit=80)=>(await query('SELECT id,agent_id,event_type,master_position_id,copied_ticket,message,created_at FROM copy_agent_events ORDER BY created_at DESC LIMIT $1',[limit])).rows,

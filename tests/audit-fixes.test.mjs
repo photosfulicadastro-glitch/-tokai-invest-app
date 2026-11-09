@@ -35,10 +35,15 @@ test('aluno bloqueado perde o Copy no EA e recupera ao liberar',async()=>{
   assert.equal((await rq('/v1/copy/activate','',body)).s,200);
   assert.equal((await rq('/v1/copy/plan','',{...body,equity:1000})).s,200);
   await rq('/v1/admin/access',admin,{id:a.user.id,action:'block'});
-  assert.equal((await rq('/v1/copy/plan','',{...body,equity:1000})).s,403);
+  const exit=await rq('/v1/copy/plan','',{...body,equity:1000});assert.equal(exit.s,200);assert.equal(exit.d.exit_only,true);assert.equal(exit.d.close_all,false);
+  assert.equal((await rq('/v1/copy/plan','',{...body,fingerprint:'fp-OUTRAOUTRAOUTRA1',equity:1000})).s,403);
+  assert.equal((await rq('/v1/admin/copy/close-all',admin,{user_id:a.user.id})).s,200);
+  assert.equal((await rq('/v1/copy/plan','',{...body,equity:1000})).d.close_all,true);
   assert.equal((await rq('/v1/copy/report','',{...body,equity:1000,event_type:'status',message:'x'})).s,403);
   await rq('/v1/admin/access',admin,{id:a.user.id,action:'enable'});
-  assert.equal((await rq('/v1/copy/plan','',{...body,equity:1000})).s,200);
+  const back=await rq('/v1/copy/plan','',{...body,equity:1000});assert.equal(back.s,200);assert.equal(back.d.exit_only,false);assert.equal(back.d.close_all,false);
+  await rq('/v1/admin/access',admin,{id:a.user.id,action:'block'});
+  assert.equal((await rq('/v1/copy/plan','',{...body,equity:1000})).d.close_all,false);
  }finally{await close();}
 });
 

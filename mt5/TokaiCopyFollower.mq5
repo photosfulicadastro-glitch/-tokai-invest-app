@@ -1,5 +1,5 @@
 #property strict
-#property version "1.22"
+#property version "1.23"
 // TOKAI COPY FOLLOWER
 // A conta da corretora permanece local no MT5. A licença é vinculada a uma única conta e instalação.
 // V1: XAUUSD em contas MT5 com modo hedging. A API deve estar liberada em Ferramentas > Opções > Expert Advisors.
@@ -256,6 +256,16 @@ void CloseRemoved(MasterPosition &masters[]){
   if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk()){string message="Falha ao fechar posição removida: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message);ReportError(message,MasterIdFromComment(comment));}else Report("closed","Fechamento recebido da conta-mãe",MasterIdFromComment(comment),TicketText(ticket));
  }
 }
+void CloseAllTokai(){
+ for(int i=PositionsTotal()-1;i>=0;i--){
+  ulong ticket=PositionGetTicket(i);
+  if(ticket==0||!PositionSelectByTicket(ticket))continue;
+  if(PositionGetInteger(POSITION_MAGIC)!=(long)TokaiMagic)continue;
+  string comment=PositionGetString(POSITION_COMMENT);
+  if(!IsTokaiComment(comment))continue;
+  if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk()){string message="Falha ao encerrar por ordem do administrador: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message);ReportError(message,MasterIdFromComment(comment));}else Report("closed","Encerrada por ordem do administrador",MasterIdFromComment(comment),TicketText(ticket));
+ }
+}
 void SyncPositions(MasterPosition &masters[],bool allowNewEntries){
  for(int i=0;i<ArraySize(masters);i++){
   MasterPosition master=masters[i];
@@ -289,12 +299,16 @@ void PollAndCopy(){
  MasterPosition masters[];
  if(!JsonStringField(response,"execution_mode",mode)||!JsonNumberField(response,"max_daily_loss_percent",serverLimit)||!JsonNumberField(response,"observed_at",observedAt)||!ParseMasterPositions(response,masters)){SetStatus("Plano inválido ou conta-mãe indisponível","error");return;}
  if(TimeGMT()-(datetime)observedAt>MasterMaxAgeSeconds){SetStatus("Conta-mãe sem atualização recente");return;}
- if(mode=="off"){SetStatus("Copy desligado pelo administrador");return;}
- if(!AccountIsAllowed(mode)){SetStatus("Conta não permitida pelo modo global","blocked");return;}
+ bool exitOnly=StringFind(response,"\"exit_only\":true")>=0;
+ bool closeAll=StringFind(response,"\"close_all\":true")>=0;
+ if(closeAll){CloseAllTokai();SetStatus("Encerrado por ordem do administrador; sem novas entradas","blocked");return;}
+ if(mode=="off")exitOnly=true;
+ else if(!AccountIsAllowed(mode)){SetStatus("Conta não permitida pelo modo global","blocked");return;}
  double limit=MathMin(LocalDailyLossPercent,serverLimit);
  bool limitLocked=currentDailyLoss>=limit;
- bool allowNewEntries=!lossLocked&&!limitLocked&&limit>0;
+ bool allowNewEntries=!exitOnly&&!lossLocked&&!limitLocked&&limit>0;
  SyncPositions(masters,allowNewEntries);
+ if(exitOnly){SetStatus(mode=="off"?"Copy desligado: apenas acompanha saídas da conta-mãe":"Acesso Copy inativo: apenas acompanha saídas da conta-mãe","blocked");return;}
  SetStatus((lossLocked||limitLocked)?"Novas entradas pausadas por limite diário":"Sincronizado — "+IntegerToString(ArraySize(masters))+" posição(ões) da conta-mãe",(lossLocked||limitLocked)?"blocked":"status");
 }
 int OnInit(){
