@@ -1,5 +1,5 @@
 #property strict
-#property version "1.23"
+#property version "1.24"
 // TOKAI COPY FOLLOWER
 // A conta da corretora permanece local no MT5. A licença é vinculada a uma única conta e instalação.
 // V1: XAUUSD em contas MT5 com modo hedging. A API deve estar liberada em Ferramentas > Opções > Expert Advisors.
@@ -11,6 +11,7 @@ input long ExpectedAccount=0;
 input string ExpectedServer="";
 input string GoldSymbol="XAUUSD";
 input double LocalDailyLossPercent=10.0; // Pode ser menor que o teto da Tokai, nunca maior.
+input bool CloseAllOnLimit=true; // Ao atingir a perda diária: ENCERRA todas as posições Tokai e bloqueia o dia (não só pausa novas entradas).
 input double VolumeMultiplier=1.0;
 input long TokaiMagic=41277716;
 input int MaxSlippagePoints=30;
@@ -28,7 +29,7 @@ CTrade trade;
 string fingerprint,dayKey;
 double openingEquity=0;
 bool activated=false,lossLocked=false;
-double currentDailyLoss=0;
+double currentDailyLoss=0,lastServerLimit=0;
 string lastStatus="Inicializando";
 string lastErrorKey="";
 datetime lastErrorAt=0;
@@ -256,14 +257,14 @@ void CloseRemoved(MasterPosition &masters[]){
   if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk()){string message="Falha ao fechar posição removida: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message);ReportError(message,MasterIdFromComment(comment));}else Report("closed","Fechamento recebido da conta-mãe",MasterIdFromComment(comment),TicketText(ticket));
  }
 }
-void CloseAllTokai(){
+void CloseAllTokai(string why="Encerrada por ordem do administrador"){
  for(int i=PositionsTotal()-1;i>=0;i--){
   ulong ticket=PositionGetTicket(i);
   if(ticket==0||!PositionSelectByTicket(ticket))continue;
   if(PositionGetInteger(POSITION_MAGIC)!=(long)TokaiMagic)continue;
   string comment=PositionGetString(POSITION_COMMENT);
   if(!IsTokaiComment(comment))continue;
-  if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk()){string message="Falha ao encerrar por ordem do administrador: "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message);ReportError(message,MasterIdFromComment(comment));}else Report("closed","Encerrada por ordem do administrador",MasterIdFromComment(comment),TicketText(ticket));
+  if(!trade.PositionClose(ticket,(ulong)MaxSlippagePoints)||!TradeResultOk()){string message="Falha ao encerrar ("+why+"): "+trade.ResultRetcodeDescription();Print("TOKAI COPY: ",message);ReportError(message,MasterIdFromComment(comment));}else Report("closed",why,MasterIdFromComment(comment),TicketText(ticket));
  }
 }
 void SyncPositions(MasterPosition &masters[],bool allowNewEntries){
@@ -304,6 +305,7 @@ void PollAndCopy(){
  if(closeAll){CloseAllTokai();SetStatus("Encerrado por ordem do administrador; sem novas entradas","blocked");return;}
  if(mode=="off")exitOnly=true;
  else if(!AccountIsAllowed(mode)){SetStatus("Conta não permitida pelo modo global","blocked");return;}
+ lastServerLimit=serverLimit;
  double limit=MathMin(LocalDailyLossPercent,serverLimit);
  bool limitLocked=currentDailyLoss>=limit;
  bool allowNewEntries=!exitOnly&&!lossLocked&&!limitLocked&&limit>0;
@@ -326,7 +328,10 @@ void OnTimer(){
  string today=TokyoDay();
  if(today!=dayKey){dayKey=today;LoadDay();}
  double equity=AccountInfoDouble(ACCOUNT_EQUITY);currentDailyLoss=openingEquity>0?(openingEquity-equity)*100.0/openingEquity:0;
- if(currentDailyLoss>=LocalDailyLossPercent&&!lossLocked)LockDay();
+ double stopAt=LocalDailyLossPercent;if(lastServerLimit>0)stopAt=MathMin(stopAt,lastServerLimit);
+ if(currentDailyLoss>=stopAt&&!lossLocked)LockDay();
+ // Proteção independente da rede: no limite diário fecha tudo (a cada ciclo até zerar).
+ if(CloseAllOnLimit&&currentDailyLoss>=stopAt){if(!lossLocked)LockDay();CloseAllTokai("Encerrada por limite diário de perda");}
  PollAndCopy();
- Comment("TOKAI COPY\n"+lastStatus+"\nPerda diária: "+DoubleToString(MathMax(0,currentDailyLoss),2)+"%"+(lossLocked?" — novas entradas pausadas":""));
+ Comment("TOKAI COPY\n"+lastStatus+"\nPerda diária: "+DoubleToString(MathMax(0,currentDailyLoss),2)+"%"+(lossLocked?(CloseAllOnLimit?" — posições encerradas, sem novas entradas hoje":" — novas entradas pausadas"):""));
 }
