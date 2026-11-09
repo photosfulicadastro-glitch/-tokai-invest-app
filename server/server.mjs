@@ -3,7 +3,7 @@ import {createPush} from './push.mjs';
 import {createAuth,HttpError,readJson,TERMS_VERSION} from './auth.mjs';
 import {sqliteStore,postgresStore} from './storage.mjs';
 import {createHash,timingSafeEqual,randomBytes,randomUUID} from 'node:crypto';
-import {readFile} from 'node:fs/promises';
+import {readFile,access} from 'node:fs/promises';
 const hash=s=>createHash('sha256').update(s).digest();
 const u16=n=>{const b=Buffer.alloc(2);b.writeUInt16LE(n&0xffff);return b;};
 const u32=n=>{const b=Buffer.alloc(4);b.writeUInt32LE(n>>>0);return b;};
@@ -11,6 +11,41 @@ const crc32=data=>{let crc=0xffffffff;for(const byte of data){crc^=byte;for(let 
 // Arquivo ZIP sem compressão para não depender de bibliotecas externas no servidor.
 const zip=entries=>{let offset=0;const local=[],central=[];for(const entry of entries){const name=Buffer.from(entry.name,'utf8'),body=Buffer.isBuffer(entry.body)?entry.body:Buffer.from(entry.body,'utf8'),sum=crc32(body);const part=Buffer.concat([Buffer.from([0x50,0x4b,0x03,0x04]),u16(20),u16(0x800),u16(0),u16(0),u16(0),u32(sum),u32(body.length),u32(body.length),u16(name.length),u16(0),name,body]);local.push(part);central.push(Buffer.concat([Buffer.from([0x50,0x4b,0x01,0x02]),u16(20),u16(20),u16(0x800),u16(0),u16(0),u16(0),u32(sum),u32(body.length),u32(body.length),u16(name.length),u16(0),u16(0),u16(0),u16(0),u32(0),u32(offset),name]));offset+=part.length;}const directory=Buffer.concat(central),end=Buffer.concat([Buffer.from([0x50,0x4b,0x05,0x06]),u16(0),u16(0),u16(entries.length),u16(entries.length),u32(directory.length),u32(offset),u16(0)]);return Buffer.concat([...local,directory,end]);};
 const cleanSetValue=value=>String(value??'').replace(/[\r\n]/g,'').trim();
+async function monitorZip({key,name,account,origin}){
+ const executable=await readFile(new URL('../mt5/TokaiMonitor.ex5',import.meta.url));
+ const settings=[
+  '; TOKAI MONITOR — configuração individual de '+cleanSetValue(name)+'. Não compartilhe este arquivo.',
+  'ApiUrl='+cleanSetValue(origin).replace(/\/$/,'')+'/api',
+  'IngestToken='+cleanSetValue(key),
+  'Source=principal',
+  'GoldSymbol=XAUUSD',
+  'ExpectedAccount='+cleanSetValue(account),
+  'HistoryDays=30',
+  ''
+ ].join('\r\n');
+ const readme=[
+  'TOKAI MONITOR — PACOTE DO COMPUTADOR "'+cleanSetValue(name)+'"',
+  '',
+  'Este monitor apenas LÊ a conta-mãe (login '+cleanSetValue(account)+') e envia os dados ao servidor Tokai. Ele não opera.',
+  'A chave deste pacote é exclusiva deste computador e pode ser revogada no painel sem afetar os outros.',
+  '',
+  'INSTALAÇÃO',
+  '1. No MetaTrader 5 logado na conta-mãe, abra Arquivo > Abrir Pasta de Dados > MQL5 > Experts.',
+  '2. Copie TokaiMonitor.ex5 para essa pasta e reinicie o MT5 (ou clique com o botão direito em Experts > Atualizar).',
+  '3. Em Ferramentas > Opções > Expert Advisors, marque Permitir WebRequest e adicione https://sinais.tokaiinvest.jp',
+  '4. Abra um gráfico XAUUSD (ou o símbolo de ouro da corretora) e arraste o TokaiMonitor para ele.',
+  '5. Na aba Inputs, clique em Carregar e escolha TokaiMonitor.set deste pacote. Se o símbolo do ouro tiver outro nome, ajuste GoldSymbol.',
+  '6. Ative Algo Trading (botão no topo do MT5) e confirme o rosto sorridente no canto do gráfico.',
+  '7. No painel Tokai, em Acessos > Monitores, a coluna ÚLTIMO ENVIO deve atualizar em poucos segundos.',
+  '',
+  'IMPORTANTE',
+  '- Deixe o relógio do Windows em horário automático; diferença acima de 5 minutos faz o servidor recusar os dados.',
+  '- O monitor só envia quando o MT5 está conectado e logado exatamente na conta '+cleanSetValue(account)+'.',
+  '- Não compartilhe este pacote: quem tiver o .set consegue enviar dados em nome deste computador.',
+  ''
+ ].join('\r\n');
+ return zip([{name:'TokaiMonitor.ex5',body:executable},{name:'TokaiMonitor.set',body:settings},{name:'LEIA-ME.txt',body:readme}]);
+}
 async function installerZip({license,agent,origin}){
  const apiUrl=cleanSetValue(origin).replace(/\/$/,'')+'/api';
  const settings=[
@@ -96,6 +131,17 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const key=randomBytes(32).toString('base64url');
     const monitor=await db.auth.monitorCreate({id:randomUUID(),name,hash:createHash('sha256').update(key).digest('hex'),now:now()});
     return send(201,{monitor,key});
+   }
+   if(req.url==='/v1/admin/monitors/package'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req),name=typeof b.name==='string'?b.name.trim():'',account=String(b.account??'').trim();
+    if(!name||name.length>80)return send(400,{error:'Informe um nome de até 80 caracteres para o computador.'});
+    if(!/^[0-9]{3,12}$/.test(account))return send(400,{error:'Informe o login numérico da conta-mãe MT5.'});
+    try{await access(new URL('../mt5/TokaiMonitor.ex5',import.meta.url));}catch{return send(503,{error:'O arquivo TokaiMonitor.ex5 ainda não está no servidor.'});}
+    const key=randomBytes(32).toString('base64url');
+    await db.auth.monitorCreate({id:randomUUID(),name,hash:createHash('sha256').update(key).digest('hex'),now:now()});
+    const bundle=await monitorZip({key,name,account,origin});
+    return sendZip('tokai-monitor-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)+'.zip',bundle);
    }
    if(req.url==='/v1/admin/monitors/revoke'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
