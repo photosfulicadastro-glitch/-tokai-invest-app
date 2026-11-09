@@ -298,7 +298,8 @@ async function refresh(force=true){
  let changed=force;
  try{
   if(!identity){const me=await api('/v1/me',undefined,current);if(current!==token)return;identity=me.user;updateNav();await window.tokaiPush?.restore(api).catch(()=>{});}
-  const result=await api('/v1/state',undefined,current);if(current!==token)return;
+  const copyOnly=identity?.role==='reader'&&identity.plan_code==='copy';
+  const result=copyOnly?(data||{online:false,received_at:null,state:null,deals:[]}):await api('/v1/state',undefined,current);if(current!==token)return;
   const candleStale=d=>!!d?.state?.candles_received_at&&Date.now()-d.state.candles_received_at>30000;
   changed=changed||!data||!!error||data.received_at!==result.received_at||data.online!==result.online||lastCandleStale!==candleStale(result);
   data=result;error='';
