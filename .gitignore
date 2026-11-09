@@ -3,3 +3,7 @@
 *.sqlite-shm
 *.sqlite-wal
 node_modules/
+backups/
+*.dump
+*.bak
+*.bak.*

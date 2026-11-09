@@ -1,49 +1,42 @@
-# Acesso individual — teste de sinais
+# TOKAI INVEST — acessos, Copy Trading e operação
 
-## Para Fuli
-1. Abra o aplicativo e escolha **Acesso administrativo**.
-2. Use a chave atual `VIEWER_TOKEN` (Render → Environment). Essa chave é exclusiva do responsável: não distribua.
-3. Abra **Acessos**, informe nome e um nome de usuário (por exemplo `maria.silva`) e clique em **Gerar convite**.
-4. Copie o link e envie individualmente à pessoa, junto com o nome de usuário. O aplicativo não envia e-mails ou mensagens automaticamente.
-5. O convidado abre o link, cria uma senha de exatamente 9 caracteres e passa a usar seu nome de usuário e senha.
+Documento de operação. Não contém chaves nem senhas: elas ficam só no arquivo `.env` da VPS (`/opt/tokai/app/.env`, fora do Git).
 
-O convite vale 72 horas e é de uso único. O link só é mostrado na criação e não fica armazenado em texto no banco. Para reenviar, gere **Novo convite**. Essa ação também invalida a senha e as sessões anteriores. **Bloquear** impede novas consultas e revoga as sessões; **Liberar** exige um novo login. Um convite bloqueado precisa de um novo convite para ser ativado.
+## Ambiente
+- Site e API: https://sinais.tokaiinvest.jp (VPS Hostinger; Docker Compose com `db` PostgreSQL 16, `api` Node 24 e `web` Caddy).
+- Deploy (☁️ terminal da VPS), sempre com o arquivo de configurações:
+  `cd /opt/tokai/app && git pull --ff-only && cd deploy && docker compose --env-file /opt/tokai/app/.env up -d --build api web`
+- Branch de produção: `chore/hostinger-vps-prep`. Mudanças entram por Pull Request com testes verdes (`npm test`).
 
-## Controle manual de mensalidade (em preparação)
+## Fluxo do aluno
+1. **Cadastro** (`https://sinais.tokaiinvest.jp/#cadastro=1`): nome, usuário, senha de 9 caracteres, plano de assinatura (Sinais, Copy ou Sinais + Copy), **plano de pagamento** (Teste grátis 7 dias, Mensal 30, Trimestral 90, Semestral 180 ou Anual 365 dias) e aceite do Termo de Ciência de Riscos. Para Copy, informa conta MT5 e servidor.
+2. O cadastro entra como **pendente**. Para Copy, a conta MT5 já é cadastrada com limite diário de 10% e **não pode se repetir entre alunos**.
+3. **Aprovação** (admin → Acessos → Lista de alunos → *Aprovar (após pagamento)*): libera o acesso e define o vencimento pela duração do plano de pagamento.
+4. **Instalador** (Copy): admin → Copy Trading → *Licença e instalador individual* → baixar pacote. Cada licença vale para uma instalação. Para reinstalar ou trocar de computador: *Revogar licença* e baixar novo pacote (cada download revoga o anterior).
+5. O aluno só pode **reduzir** o próprio limite diário de perda; aumentar é com a equipe.
 
-A primeira etapa usa somente o plano **Sinais**. Ao gerar um convite, o administrador informa a data “Acesso até”. A confirmação do pagamento continua externa e manual nesta etapa; o sistema apenas libera ou pausa o painel conforme a data e o status definidos. O plano **Premium** fica reservado para um futuro espelhamento de operações, após validações técnicas e jurídicas.
+## Bloqueio e encerramento (Copy)
+- **Bloquear**, plano vencido/pausado ou modo global "desligado": o robô do aluno **não abre novas posições**, mas as já copiadas continuam acompanhando as saídas da conta-mãe.
+- **Bloquear e encerrar Copy** (emergência): bloqueia e manda o robô fechar todas as posições do Copy em poucos segundos.
+- Licença revogada ou instalação diferente: o servidor recusa o robô (sem instruções).
+- Modo global (Copy Trading → controle): desligado, só demo, só real, demo e real. **Hoje: só demo.** Só passar para real após teste final com alunos de confiança.
 
-- Pausar ou alterar a data encerra as sessões do aluno; ele precisa entrar novamente após uma renovação.
-- Alunos que já existiam antes desse recurso permanecem como **acesso legado**, sem data de vencimento, até que o administrador faça a primeira renovação manual.
-- Esta etapa não cria cobrança, não salva dados de cartão e não altera MT5, operações ou histórico.
-- A integração futura de pagamento automático deve usar o mesmo status e a mesma data de acesso, por confirmação autenticada do provedor.
+## Conta-mãe e monitores
+- A conta-mãe é uma só, aberta em vários computadores. O `TokaiMonitor` pode rodar em mais de um; o servidor descarta dados repetidos ou mais antigos.
+- Cada computador deve ter a **sua chave de envio**: admin → Acessos → *Monitores*. A chave aparece uma vez; revogar uma não afeta as outras. A chave antiga (`INGEST_TOKEN` do `.env`) segue válida até ser desligada.
+- O relógio de cada computador deve estar automático (o servidor recusa dados com mais de 5 minutos de diferença).
 
-## Termo de ciência de riscos (em preparação)
+## Segurança
+- Senhas com scrypt; sessões, convites e licenças guardados apenas como hash; sessões revogadas no bloqueio.
+- A chave administrativa (`VIEWER_TOKEN`) é exclusiva do responsável. Nunca enviar a alunos ou professores.
+- Caddy com HSTS, anti-clickjacking, `nosniff` e sem cache de tela/API.
+- Os dados de produção ficam no PostgreSQL da VPS. A pasta `backups/` nunca vai para o Git.
 
-Na ativação do convite, o aluno deve ler um resumo, abrir o termo completo se desejar e marcar a concordância obrigatória. A API recusa a ativação sem essa confirmação e registra no banco a versão do termo e o horário de aceitação. A versão inicial é `signals-risk-v1`.
-
-O termo deixa claro que sinais não são garantia de ganho, que operações financeiras podem gerar perdas e que a decisão e o risco da operação são do usuário. A cláusula de responsabilidade é limitada “na extensão permitida pela legislação aplicável”; ela não deve ser tratada como substituta de revisão jurídica, especialmente antes de uma comercialização ou espelhamento automático.
-
-## O que o usuário recebe
-
-Apenas Visão geral, Mercado, Operações e Histórico da conta principal, em modo de leitura. Nenhum usuário conecta sua própria conta MT5 ou envia ordens. Acesso à conexão MT5 e à gestão de usuários fica restrito ao administrador. Espelhamento, Minha conta, cadastro de sinais manuais e telas futuras foram retirados da navegação. O código reservado está em `archive/future-pages.js.txt` e no histórico Git, sem ser carregado pelo aplicativo.
-
-As posições, cotações, candles e execuções são consultadas a cada um segundo enquanto o painel está aberto. **Notificações push estão disponíveis:** use “Ativar notificações”, autorize no aparelho e toque em “Testar notificação”. No iPhone, adicione à Tela de Início pelo Safari e abra pelo ícone (iOS 16.4+). Entradas, saídas parciais e fechamentos novos são notificados; recuperação do histórico não dispara alertas antigos.
-
-## Segurança e persistência
-
-- Senhas com scrypt (N=32768, r=8, p=3), salt individual; nenhum armazenamento de senha em texto.
-- Tokens de sessão e de convite aleatórios de 256 bits; apenas hashes no banco.
-- Sessões de usuário expiram em 12 horas e são revogadas no servidor no logout, bloqueio ou recuperação.
-- A sessão do leitor fica no sessionStorage da aba, sem guardar a senha; a chave administrativa fica só em memória. Fechar a aba normalmente exige novo login.
-- Controle de acesso em cada rota da API, além de esconder menus; usuários não podem ingerir snapshots nem gerir acessos.
-- Limite de tentativas de login por nome de usuário e limite global em memória. Reinício zera esses contadores; não substitui proteção de borda para uma distribuição ampla.
-- Sem cadastro público aberto, envio de e-mail, cobrança ou credenciais de corretora para leitores.
-- Não adicionar scripts de terceiros sem rever o acesso às sessões. A hospedagem atual usa origens distintas para frontend e API.
-- As tabelas de usuários e sessões são criadas automaticamente no mesmo PostgreSQL, sem alterar histórico ou chaves MT5. O banco de testes tem expiração; planejar exportação/migração antes de 25/11/2026.
+## Backup
+- Diário: `/opt/tokai/backup.sh` (cron 18:15 UTC = 03:15 no Japão), `pg_dump -Fc` em `/opt/tokai/app/backups`, retenção de 14 dias. Restauração testada em 09/11/2026.
+- Semanal: backup automático da Hostinger (ativo no hPanel).
+- Pendente: cópia diária fora da VPS (por exemplo, para o Mac).
+- Restaurar para teste (sem tocar a produção): criar um banco temporário e usar `pg_restore --no-owner` com o arquivo `.dump`.
 
 ## Verificação
-
-`npm test` cobre convites, uso único concorrente, senha incorreta, leitura, isolamento entre leitor/administrador/ingestão, persistência após reinício, bloqueio, logout, recuperação, expiração, limite de tentativas, CORS, navegação e escape de nomes. O PostgreSQL é a persistência de produção; os testes locais usam SQLite com o mesmo repositório SQL de autenticação.
-
-Em Acessos, você pode excluir usuários com confirmação e definir uma frase-senha administrativa com exatamente 9 caracteres. Entre inicialmente com VIEWER_TOKEN; após salvar, use a nova senha. A chave original continua válida para recuperação. Nunca envie a chave administrativa aos leitores.
+`npm test` cobre convites, ativação, cadastro público com plano de pagamento e teste grátis, aprovação, bloqueio e liberação, modo só-saída e encerramento de emergência, chaves de monitor, conta MT5 duplicada, isolamento entre perfis e a navegação.
