@@ -80,3 +80,13 @@ test('cadastro com plano de pagamento pré-cria o agente Copy e a aprovação li
   assert.equal((await rq('/v1/admin/approve',admin,{id:user.id})).s,409);
  }finally{await close();}
 });
+
+test('teste grátis de 7 dias libera por 7 dias na aprovação',async()=>{
+ const {rq,admin,storage,close}=await setup();
+ try{
+  assert.equal((await rq('/v1/auth/register','',{name:'Aluno Teste',username:'aluno.teste',password:PASSWORD,plan:'signals',payment_plan:'trial',terms_accepted:true,terms_version:TERMS})).s,202);
+  const user=await storage.auth.find('aluno.teste');
+  const ok=await rq('/v1/admin/approve',admin,{id:user.id});assert.equal(ok.s,200);
+  const days=(ok.d.access_until-Date.now())/864e5;assert.ok(days>6&&days<8.1);
+ }finally{await close();}
+});
