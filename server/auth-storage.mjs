@@ -35,6 +35,14 @@ CREATE TABLE IF NOT EXISTS signal_registrations (
  created_at BIGINT NOT NULL
 );
 CREATE INDEX IF NOT EXISTS signal_registrations_plan ON signal_registrations(requested_plan);
+CREATE TABLE IF NOT EXISTS monitor_keys (
+ id TEXT PRIMARY KEY,
+ name TEXT NOT NULL,
+ token_hash TEXT NOT NULL UNIQUE,
+ created_at BIGINT NOT NULL,
+ revoked_at BIGINT,
+ last_seen_at BIGINT
+);
 CREATE TABLE IF NOT EXISTS signal_registration_payments (
  user_id TEXT PRIMARY KEY REFERENCES signal_users(id),
  payment_plan TEXT NOT NULL
@@ -52,6 +60,11 @@ export function authRepository(query){
   remove:async id=>{await query("UPDATE signal_users SET status='blocked',version=version+1 WHERE id=$1",[id]);await query('DELETE FROM signal_sessions WHERE user_id=$1',[id]);await query('DELETE FROM push_subscriptions WHERE user_id=$1',[id]);await query('DELETE FROM copy_agent_events WHERE agent_id IN (SELECT id FROM copy_agents WHERE user_id=$1)',[id]);await query('DELETE FROM copy_licenses WHERE agent_id IN (SELECT id FROM copy_agents WHERE user_id=$1)',[id]);await query('DELETE FROM copy_agents WHERE user_id=$1',[id]);await query('DELETE FROM copy_memberships WHERE user_id=$1',[id]);await query('DELETE FROM signal_memberships WHERE user_id=$1',[id]);await query('DELETE FROM signal_terms_acceptances WHERE user_id=$1',[id]);await query('DELETE FROM signal_registrations WHERE user_id=$1',[id]);return one('DELETE FROM signal_users WHERE id=$1 RETURNING id',[id]);},
   list:async()=> (await query("SELECT u.id,u.username,u.display_name,u.status,u.created_at,m.plan_code,m.status AS membership_status,m.access_until,r.requested_plan,r.mt5_account AS requested_mt5_account,r.broker_server AS requested_broker_server,r.created_at AS registration_created_at,rp.payment_plan,t.accepted_at AS terms_accepted_at,t.terms_version FROM signal_users u LEFT JOIN signal_memberships m ON m.user_id=u.id LEFT JOIN signal_registrations r ON r.user_id=u.id LEFT JOIN signal_registration_payments rp ON rp.user_id=u.id LEFT JOIN signal_terms_acceptances t ON t.user_id=u.id AND t.terms_version='signals-copy-risk-v2' ORDER BY u.created_at DESC LIMIT 500",[])).rows,
   pendingRegistration:id=>one("SELECT u.id,u.status,r.requested_plan,COALESCE(rp.payment_plan,'monthly') AS payment_plan FROM signal_users u JOIN signal_registrations r ON r.user_id=u.id LEFT JOIN signal_registration_payments rp ON rp.user_id=u.id WHERE u.id=$1",[id]),
+  monitorList:async()=>(await query('SELECT id,name,created_at,revoked_at,last_seen_at FROM monitor_keys ORDER BY created_at DESC LIMIT 100',[])).rows,
+  monitorCreate:m=>one('INSERT INTO monitor_keys(id,name,token_hash,created_at) VALUES($1,$2,$3,$4) RETURNING id,name,created_at',[m.id,m.name,m.hash,m.now]),
+  monitorByHash:hash=>one('SELECT id FROM monitor_keys WHERE token_hash=$1 AND revoked_at IS NULL',[hash]),
+  monitorSeen:(id,now)=>query('UPDATE monitor_keys SET last_seen_at=$2 WHERE id=$1',[id,now]),
+  monitorRevoke:(id,now)=>one('UPDATE monitor_keys SET revoked_at=$2 WHERE id=$1 AND revoked_at IS NULL RETURNING id',[id,now]),
   find:username=>one('SELECT * FROM signal_users WHERE username=$1',[username]),
   invite:hash=>one("SELECT id FROM signal_users WHERE invite_hash=$1 AND status='invited'",[hash]),
   create:async u=>{try{const created=await one("INSERT INTO signal_users(id,username,display_name,status,invite_hash,invite_expires,created_at) VALUES($1,$2,$3,'invited',$4,$5,$6) RETURNING id",[u.id,u.username,u.name,u.hash,u.expires,u.now]);if(created)await query("INSERT INTO signal_memberships(user_id,plan_code,status,access_until,updated_at) VALUES($1,$2,'active',$3,$4)",[created.id,u.plan||'signals',u.accessUntil??null,u.now]);return created;}catch(e){if(e.code==='23505'||e.code==='ERR_SQLITE_ERROR'&&/UNIQUE/.test(e.message))return null;throw e;}},

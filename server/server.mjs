@@ -79,6 +79,24 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   try{
    const user=allowed(token,viewerToken)?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
    const isAdmin=user?.role==='admin';
+   if(req.url==='/v1/admin/monitors'&&req.method==='GET'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    return send(200,{monitors:await db.auth.monitorList()});
+   }
+   if(req.url==='/v1/admin/monitors'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req),name=typeof b.name==='string'?b.name.trim():'';
+    if(!name||name.length>80)return send(400,{error:'Informe um nome de até 80 caracteres para o computador.'});
+    const key=randomBytes(32).toString('base64url');
+    const monitor=await db.auth.monitorCreate({id:randomUUID(),name,hash:createHash('sha256').update(key).digest('hex'),now:now()});
+    return send(201,{monitor,key});
+   }
+   if(req.url==='/v1/admin/monitors/revoke'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req);
+    if(typeof b.id!=='string'||!await db.auth.monitorRevoke(b.id,now()))return send(404,{error:'Chave não encontrada ou já revogada.'});
+    return send(200,{ok:true});
+   }
    if(req.url==='/v1/admin/copy/overview'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const [settings,users,events]=await Promise.all([db.copy.settings(),db.auth.list(),db.copy.recentEvents(80)]);
@@ -205,7 +223,11 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     return send(200,{ok:true,execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD'});
    }
    if(await auth.route(req,send,isAdmin,token))return;
-   if(ingestion?!allowed(token,ingestToken):!user)return send(401,{error:'Acesso não autorizado'});
+   let monitorId=null;
+   if(ingestion&&!allowed(token,ingestToken)){
+    const found=/^[A-Za-z0-9_-]{43}$/.test(token)?await db.auth.monitorByHash(createHash('sha256').update(token).digest('hex')):null;
+    if(!found)return send(401,{error:'Acesso não autorizado'});monitorId=found.id;
+   }else if(!ingestion&&!user)return send(401,{error:'Acesso não autorizado'});
    const signalsPlan=isAdmin||['signals','signals_copy'].includes(user?.plan_code);
    if((req.url==='/v1/state'||req.url.startsWith('/v1/push'))&&user&&!signalsPlan)return send(403,{error:'Seu plano não inclui o painel de sinais.'});
    if(await (await pushReady).route(req,send,user))return;
@@ -213,6 +235,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    if(ingestion){
     const s=await readJson(req,2_000_000);validate(s,source);
     if(historyStart>0)s.deals=s.deals.filter(d=>Number(d.time)>=historyStart);
+    if(monitorId)await db.auth.monitorSeen(monitorId,now());
     if(!await db.save(s,now()))return send(409,{error:'Snapshot anterior ao estado atual'});
     void drain();return send(200,{ok:true});
    }
