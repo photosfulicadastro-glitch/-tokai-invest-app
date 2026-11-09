@@ -222,7 +222,7 @@ function candleView(){
  const date=t=>new Date(t*1000).toISOString().slice(0,16).replace('T',' ');
  const levels=Array.from({length:6},(_,i)=>{const v=high-(high-low)*i/5;return {v,yy:y(v)};});
  const grid=levels.map(({yy})=>`<line x1="${L}" x2="${W}" y1="${yy}" y2="${yy}" stroke="#161c24" shape-rendering="crispEdges"/>`).join('');
- const axis=levels.map(({v,yy})=>`<line x1="0" x2="85" y1="${yy}" y2="${yy}" stroke="#223348"/><text x="8" y="${yy+4}" fill="#b9c8da" font-size="12">${num(v)}</text>`).join('');
+ const axisRow=({v,yy})=>`<line x1="0" x2="85" y1="${yy}" y2="${yy}" stroke="#223348"/><text x="8" y="${yy+4}" fill="#b9c8da" font-size="12">${num(v)}</text>`;let axis=levels.map(axisRow).join('');
  const tickCount=Math.max(3,Math.floor(W/120)),ticks=Array.from({length:tickCount},(_,i)=>{const n=Math.round((bars.length-1)*i/(tickCount-1));return `<text x="${Math.min(W-24,Math.max(24,x(n)))}" y="${H-10}" fill="#b9c8da" font-size="12" text-anchor="middle">${clock(bars[n].time)}</text>`;}).join('');
  const bodies=bars.map((b,i)=>{const color=b.close>=b.open?UP:DOWN;return `<g><title>${date(b.time)} | A ${b.open} · Máx ${b.high} · Mín ${b.low} · F ${b.close}</title><line x1="${x(i)}" x2="${x(i)}" y1="${y(b.high)}" y2="${y(b.low)}" stroke="${color}" stroke-width="1.6" shape-rendering="crispEdges"/><rect x="${x(i)-bw/2}" y="${y(Math.max(b.open,b.close))}" width="${bw}" height="${Math.max(1.5,y(Math.min(b.open,b.close))-y(Math.max(b.open,b.close)))}" fill="${color}" stroke="${color}" stroke-width=".6" shape-rendering="crispEdges"/></g>`;}).join('');
  const seconds={M1:60,M5:300,M15:900}[tf];
@@ -248,23 +248,24 @@ function candleView(){
  let posLines='',posAxis='',posBadges='';const lastBid=Number(data?.state?.bid);if(Number.isFinite(lastBid)&&lastBid>0&&!openPos.length){const yb=clampY(lastBid);posLines+=`<line x1="${L}" x2="${W}" y1="${yb}" y2="${yb}" stroke="#8fa6bf" stroke-width="1" stroke-dasharray="2 4"/>`;posAxis+=`<g><rect x="0" y="${yb-9}" width="85" height="18" fill="#8fa6bf"/><text x="6" y="${yb+4}" fill="#071321" font-size="11" font-weight="700">${num(lastBid)}</text></g>`;}
  const items=openPos.map(p=>{const buy=p.side==='BUY',entry=Number(p.price),profit=Number(p.profit||0);return {p,buy,entry,profit,color:profit>=0?UP:DOWN,ye:clampY(entry)};});
  const spread=(arr,gap,lo,hi)=>{arr.sort((a,b)=>a.ye-b.ye);const g=arr.length>1?Math.min(gap,Math.max(10,(hi-lo)/(arr.length-1))):gap;let prev=lo-g;arr.forEach(it=>{it.ly=Math.max(it.ye,prev+g);prev=it.ly;});let next=hi+g;for(let i=arr.length-1;i>=0;i--){arr[i].ly=Math.min(arr[i].ly,next-g);next=arr[i].ly;}};
+ const tagYs=[];
  ['BUY','SELL'].forEach(side=>{
   const grp=items.filter(it=>(it.buy?'BUY':'SELL')===side);if(!grp.length)return;
   const buy=side==='BUY',mkt=Number(buy?data.state.bid:data.state.ask);if(!(Number.isFinite(mkt)&&mkt>0))return;
   const vol=grp.reduce((s,it)=>s+Number(it.p.volume||0),0),avg=vol>0?grp.reduce((s,it)=>s+it.entry*Number(it.p.volume||0),0)/vol:grp[0].entry,total=grp.reduce((s,it)=>s+it.profit,0),color=total>=0?UP:DOWN,ya=clampY(avg),ym=clampY(mkt);
   posLines+=`<rect data-position-band x="${L}" width="${w}" y="${Math.min(ya,ym)}" height="${Math.abs(ya-ym)}" fill="${color}" opacity=".10"/>`;
   posLines+=`<line data-position-live x1="${L}" x2="${W}" y1="${ym}" y2="${ym}" stroke="${color}" stroke-width="1.4" vector-effect="non-scaling-stroke"/>`;
+  tagYs.push(ym);
   posAxis+=`<g data-axis-live><rect x="0" y="${ym-9}" width="85" height="18" fill="${color}"/><text x="6" y="${ym+4}" fill="#071321" font-size="11" font-weight="700">${num(mkt)}</text></g>`;
-  if(grp.length>1){posLines+=`<line data-position-avg x1="${L}" x2="${W}" y1="${ya}" y2="${ya}" stroke="#f4bf48" stroke-width="1.2" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"><title>Preço médio ${buy?'das compras':'das vendas'} · ${num(avg)}</title></line>`;posAxis+=`<g data-axis-avg><rect x="0" y="${ya-9}" width="85" height="18" fill="#f4bf48"/><text x="6" y="${ya+4}" fill="#071321" font-size="11" font-weight="700">${num(avg)}</text></g>`;}
+  if(grp.length>1){tagYs.push(ya);posLines+=`<line data-position-avg x1="${L}" x2="${W}" y1="${ya}" y2="${ya}" stroke="#f4bf48" stroke-width="1.2" stroke-dasharray="2 3" vector-effect="non-scaling-stroke"><title>Preço médio ${buy?'das compras':'das vendas'} · ${num(avg)}</title></line>`;posAxis+=`<g data-axis-avg><rect x="0" y="${ya-9}" width="85" height="18" fill="#f4bf48"/><text x="6" y="${ya+4}" fill="#071321" font-size="11" font-weight="700">${num(avg)}</text></g>`;}
  });
- const ax=items.map(it=>({...it}));spread(ax,18,T+9,H-B-9);
- ax.forEach(it=>{
+ items.forEach(it=>{
   posLines+=`<line data-position-entry x1="${L}" x2="${W}" y1="${it.ye}" y2="${it.ye}" stroke="#7aa7ff" stroke-width="1" stroke-dasharray="6 4" vector-effect="non-scaling-stroke"><title>Entrada ${it.buy?'compra':'venda'} · ${num(it.entry)}</title></line>`;
-  posAxis+=`<g data-axis-entry><path d="M0 ${it.ye} L8 ${it.ly}" stroke="#7aa7ff" stroke-width="1" fill="none"/><rect x="8" y="${it.ly-9}" width="77" height="18" fill="#7aa7ff"/><text x="12" y="${it.ly+4}" fill="#071321" font-size="11" font-weight="700">${num(it.entry)}</text></g>`;
  });
+ axis=levels.filter(({yy})=>!tagYs.some(t=>Math.abs(t-yy)<12)).map(axisRow).join('');
  const bd=items.map(it=>({...it}));spread(bd,24,T+11,H-B-13);
  bd.forEach(it=>{
-  posBadges+=`<div data-position-badge style="position:absolute;left:10px;top:${Math.round(Math.max(2,it.ly-11))}px;background:#000;border:1px solid ${it.color};color:${it.color};border-radius:8px;padding:2px 9px;font-size:12px;font-weight:700;white-space:nowrap;pointer-events:none"><span style="color:#cfe0f2">${it.buy?'COMPRA':'VENDA'} ${num(it.p.volume)}</span> · ${it.profit>=0?'+':''}${num(it.profit)} ${cur}</div>`;
+  posBadges+=`<div data-position-badge style="position:absolute;left:10px;top:${Math.round(Math.max(2,it.ly-11))}px;background:#000;border:1px solid ${it.color};color:${it.color};border-radius:8px;padding:2px 9px;font-size:12px;font-weight:700;white-space:nowrap;pointer-events:none"><span style="color:#cfe0f2">${it.buy?'COMPRA':'VENDA'} ${num(it.p.volume)}</span> <span style="color:#7aa7ff">@ ${num(it.entry)}</span> · ${it.profit>=0?'+':''}${num(it.profit)} ${cur}</div>`;
  });
 
  return `<div class="candle-stage" style="position:relative;height:360px;overflow:hidden;background:#000"><div id="candle-scroll" title="Arraste o gráfico para cima ou para baixo para reposicionar as velas" style="position:absolute;inset:0 85px 0 0;overflow-x:auto;overflow-y:hidden;overflow-anchor:none;cursor:grab"><svg viewBox="0 0 ${W} ${H}" width="${W}" height="${H}" preserveAspectRatio="xMinYMin meet" role="img" aria-label="Candles reais de ${esc(data.state.symbol)} em ${tf}, horário da corretora" style="display:block;width:${W}px;max-width:none;height:${H}px">${grid}${ticks}${bbLines}${bodies}${posLines}${marks}</svg></div><svg viewBox="0 0 85 ${H}" aria-label="Régua de preços" style="position:absolute;right:0;top:0;width:85px;height:${H}px;background:#000;border-left:1px solid #1d2630">${axis}${posAxis}<rect data-price-axis x="0" y="0" width="85" height="${H-B}" fill="transparent" style="cursor:ns-resize;touch-action:none"><title>Arraste para cima ou para baixo para ajustar a escala vertical. Duplo clique restaura.</title></rect></svg>${posBadges}${bbLabel}</div>`;
