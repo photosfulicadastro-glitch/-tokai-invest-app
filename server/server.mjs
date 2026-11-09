@@ -89,7 +89,7 @@ async function installerZip({license,agent,origin}){
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
 const copyServiceActive=(entry,time)=>entry?.user_status==='active'&&entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
 const copyAccessUntil=value=>{if(value===null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;const time=Date.parse(value+'T14:59:59.999Z');return Number.isSafeInteger(time)&&time>0?time:undefined;};
-export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
+export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',masterAccount='',teamNames=[],origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
  const syncPlan=async({userId,plan,status,accessUntil,now:time})=>await db.copy.setCopyMembership({userId,status:(plan==='copy'||plan==='signals_copy')&&status==='active'?'active':'paused',accessUntil,now:time});
@@ -122,7 +122,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    }
    if(req.url==='/v1/admin/monitors'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
-    return send(200,{monitors:await db.auth.monitorList()});
+    return send(200,{monitors:await db.auth.monitorList(),team_names:teamNames,master_account:/^[0-9]{3,12}$/.test(String(masterAccount))?String(masterAccount):''});
    }
    if(req.url==='/v1/admin/monitors'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
@@ -134,12 +134,13 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    }
    if(req.url==='/v1/admin/monitors/package'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
-    const b=await readJson(req),name=typeof b.name==='string'?b.name.trim():'',account=String(b.account??'').trim();
+    const b=await readJson(req),name=typeof b.name==='string'?b.name.trim():'',account=String(b.account||masterAccount||'').trim();
     if(!name||name.length>80)return send(400,{error:'Informe um nome de até 80 caracteres para o computador.'});
     if(!/^[0-9]{3,12}$/.test(account))return send(400,{error:'Informe o login numérico da conta-mãe MT5.'});
     try{await access(new URL('../mt5/TokaiMonitor.ex5',import.meta.url));}catch{return send(503,{error:'O arquivo TokaiMonitor.ex5 ainda não está no servidor.'});}
     const key=randomBytes(32).toString('base64url');
-    await db.auth.monitorCreate({id:randomUUID(),name,hash:createHash('sha256').update(key).digest('hex'),now:now()});
+    const created=await db.auth.monitorCreate({id:randomUUID(),name,hash:createHash('sha256').update(key).digest('hex'),now:now()});
+    for(const old of await db.auth.monitorList())if(old.name===name&&!old.revoked_at&&old.id!==created.id)await db.auth.monitorRevoke(old.id,now());
     const bundle=await monitorZip({key,name,account,origin});
     return sendZip('tokai-monitor-'+name.toLowerCase().replace(/[^a-z0-9]+/g,'-').replace(/^-|-$/g,'').slice(0,40)+'.zip',bundle);
    }
@@ -327,6 +328,6 @@ function validate(s,source){
 if(process.argv[1]&&import.meta.url===new URL(process.argv[1],'file:').href){
  if(!process.env.DATABASE_URL)throw Error('DATABASE_URL é obrigatória no servidor');
  const storage=await postgresStore(process.env.DATABASE_URL);
- const server=createApi({storage,dbPath:process.env.DB_PATH||'tokai.sqlite',ingestToken:process.env.INGEST_TOKEN,viewerToken:process.env.VIEWER_TOKEN,source:process.env.MT5_SOURCE||'principal',origin:process.env.APP_ORIGIN});
+ const server=createApi({storage,dbPath:process.env.DB_PATH||'tokai.sqlite',ingestToken:process.env.INGEST_TOKEN,viewerToken:process.env.VIEWER_TOKEN,masterAccount:process.env.MASTER_ACCOUNT||'',teamNames:(process.env.MONITOR_NAMES??'ROBERTO – MIE,FULI – FUKUROI,EDU – SUZUKA,MARCOS – NAGANO').split(',').map(x=>x.trim()).filter(Boolean).slice(0,20),source:process.env.MT5_SOURCE||'principal',origin:process.env.APP_ORIGIN});
  server.listen(Number(process.env.PORT||8080),'0.0.0.0',()=>console.log('TOKAI API iniciada'));
 }
