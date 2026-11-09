@@ -79,6 +79,12 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   try{
    const user=allowed(token,viewerToken)?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
    const isAdmin=user?.role==='admin';
+   if(req.url==='/v1/admin/copy/close-all'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req),agent=typeof b.user_id==='string'?await db.copy.agentForUser(b.user_id):null;
+    if(!agent)return send(404,{error:'Este aluno não tem agente Copy.'});
+    await db.copy.requestCloseAll(agent.id,now());return send(200,{ok:true});
+   }
    if(req.url==='/v1/admin/monitors'&&req.method==='GET'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     return send(200,{monitors:await db.auth.monitorList()});
@@ -195,10 +201,12 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!/^[A-Za-z0-9_-]{43}$/.test(license)||!/^[0-9]{4,20}$/.test(account)||serverName.length<3||serverName.length>120||fingerprint.length<16||fingerprint.length>200||!Number.isFinite(equity)||equity<=0)return send(400,{error:'Dados do agente inválidos.'});
     const entry=await db.copy.license(createHash('sha256').update(license).digest('hex'));
     if(!entry||entry.status!=='active'||entry.expected_account!==account||entry.broker_server!==serverName||entry.terminal_fingerprint!==fingerprint)return send(403,{error:'Agente não autorizado.'});
-    if(!copyServiceActive(entry,now()))return send(403,{error:'Assinatura Copy indisponível.'});
+    const active=copyServiceActive(entry,now());
+    let closeAll=false;
+    if(active)await db.copy.clearCloseRequest(entry.agent_id);else closeAll=await db.copy.closeRequested(entry.agent_id);
     const settings=await db.copy.settings();const {row}=await db.read();const master=row?JSON.parse(row.body):null;
     await db.copy.heartbeat({id:entry.agent_id,status:'connected',equity,error:null,now:now()});
-    return send(200,{execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD',master:master?{observed_at:master.observed_at,symbol:master.symbol,positions:master.positions}:null});
+    return send(200,{exit_only:!active,close_all:closeAll,execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD',master:master?{observed_at:master.observed_at,symbol:master.symbol,positions:master.positions}:null});
    }
    if(req.url==='/v1/copy/report'&&req.method==='POST'){
     const b=await readJson(req),license=typeof b.license==='string'?b.license:'',account=String(b.account||''),serverName=String(b.server||''),fingerprint=String(b.fingerprint||''),equity=Number(b.equity),eventType=String(b.event_type||''),message=typeof b.message==='string'?b.message.trim():'',masterPositionId=b.master_position_id===undefined||b.master_position_id===''?null:String(b.master_position_id),copiedTicket=b.copied_ticket===undefined||b.copied_ticket===''?null:String(b.copied_ticket);
