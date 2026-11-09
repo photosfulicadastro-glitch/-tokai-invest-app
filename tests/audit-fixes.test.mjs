@@ -30,6 +30,8 @@ test('aluno bloqueado perde o Copy no EA e recupera ao liberar',async()=>{
   await rq('/v1/snapshot',ingest,{source:'principal',observed_at:Math.floor(Date.now()/1000),symbol:'XAUUSD',currency:'USD',bid:1,ask:1,positions:[],deals:[]});
   await rq('/v1/admin/copy/settings',admin,{execution_mode:'both',max_daily_loss_percent:10});
   const a=await member('aluno.a','copy','11111111');
+  assert.equal((await rq('/v1/copy/installer',a.token,{})).s,403);
+  assert.equal((await rq('/v1/admin/copy/links',admin,{agent_id:a.agent.id})).s,201);
   const zip=await rq('/v1/copy/installer',a.token,{});assert.equal(zip.s,200);
   const body={license:licenseFrom(zip.d),account:'11111111',server:'Exness-MT5Trial3',fingerprint:'fp-AAAAAAAAAAAAAAAA'};
   assert.equal((await rq('/v1/copy/activate','',body)).s,200);
