@@ -58,7 +58,10 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
  const syncPlan=async({userId,plan,status,accessUntil,now:time})=>await db.copy.setCopyMembership({userId,status:(plan==='copy'||plan==='signals_copy')&&status==='active'?'active':'paused',accessUntil,now:time});
- const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken),syncPlan);
+ const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken),syncPlan,{
+  taken:async(account,server)=>!!await db.copy.agentByAccount(account,server),
+  create:async({userId,account,server,now:time})=>{const settings=await db.copy.settings();await db.copy.createAgent({id:randomUUID(),userId,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(randomBytes(32)).digest('hex'),dailyLossPercent:Math.min(10,Number(settings.max_daily_loss_percent)),now:time});}
+ });
  const historyStart=Number(process.env.HISTORY_START_UNIX||0);
  const pushReady=createPush(db.push,{now});
  const drain=()=>pushReady.then(p=>p.drain()).catch(()=>console.error('Entrega de notificações pendente'));

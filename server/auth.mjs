@@ -4,6 +4,7 @@ const scrypt=promisify(scryptCallback);
 const digest=s=>createHash('sha256').update(s).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
 const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,plan_code:['signals','copy','signals_copy'].includes(u.plan_code)?u.plan_code:'signals',role:'reader'});
+export const PAYMENT_PLANS={trial:{label:'Teste grátis (7 dias)',days:7},monthly:{label:'Mensal',days:30},quarterly:{label:'Trimestral',days:90},semiannual:{label:'Semestral',days:180},annual:{label:'Anual',days:365}};
 export const TERMS_VERSION='signals-copy-risk-v2';
 export class HttpError extends Error {constructor(status,message){super(message);this.status=status;}}
 export async function readJson(req,limit=8192){
@@ -28,7 +29,7 @@ function accessUntil(value,fallback){
  const time=Date.parse(value+'T14:59:59.999Z'); // fim do dia selecionado no horário do Japão
  return Number.isSafeInteger(time)&&time>0?time:undefined;
 }
-export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPlan=async()=>{}){
+export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPlan=async()=>{},copyHooks={}){
  const attempts=new Map();let inFlight=0,lastCleanup=0;
  function throttle(key,max,ms){
   const time=now();for(const [k,v] of attempts)if(v.until<=time)attempts.delete(k);
@@ -71,11 +72,15 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
     if(b.terms_accepted!==true||b.terms_version!==TERMS_VERSION)throw new HttpError(400,'Leia e aceite o Termo de Ciência de Riscos para concluir o cadastro.');
     const needsCopy=plan==='copy'||plan==='signals_copy';
     if(needsCopy&&(!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120))throw new HttpError(400,'Para Copy, informe a conta MT5 e o servidor da corretora.');
+    const paymentPlan=b.payment_plan===undefined?'monthly':Object.hasOwn(PAYMENT_PLANS,b.payment_plan)?b.payment_plan:null;
+    if(!paymentPlan)throw new HttpError(400,'Escolha um plano de pagamento válido.');
+    if(needsCopy&&await copyHooks.taken?.(account,server))throw new HttpError(409,'Esta conta MT5 já está vinculada a outro aluno.');
     const password=await expensive(()=>passwordHash(b.password));
-    const registered=await repo.register({id:randomUUID(),username,name,passwordHash:password,plan,account:needsCopy?account:null,server:needsCopy?server:null,now:now()});
+    const registered=await repo.register({id:randomUUID(),username,name,passwordHash:password,paymentPlan,plan,account:needsCopy?account:null,server:needsCopy?server:null,now:now()});
     if(!registered)throw new HttpError(409,'Esse nome de usuário já está cadastrado.');
     await repo.acceptTerms(registered.id,TERMS_VERSION,now());
     await syncPlan({userId:registered.id,plan,status:'paused',accessUntil:null,now:now()});
+    if(needsCopy)await copyHooks.create?.({userId:registered.id,account,server,now:now()});
     send(202,{ok:true,message:'Cadastro recebido. A equipe Tokai revisará os dados e liberará o acesso.'});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/auth/login'){
@@ -117,6 +122,18 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
     const member=await repo.setMembership({id:b.id,plan,status,accessUntil:until,now:now()});if(!member)throw new HttpError(404,'Usuário não encontrado.');
     await syncPlan({userId:b.id,plan,status,accessUntil:until,now:now()});
     send(200,{member});return true;
+   }
+   if(req.method==='POST'&&req.url==='/v1/admin/approve'){
+    const b=await readJson(req);if(typeof b.id!=='string')throw new HttpError(400,'Aluno inválido.');
+    const reg=await repo.pendingRegistration(b.id);if(!reg)throw new HttpError(404,'Cadastro não encontrado.');
+    if(reg.status!=='pending')throw new HttpError(409,'Este cadastro não está pendente.');
+    const days=PAYMENT_PLANS[reg.payment_plan]?.days??30;
+    const until=accessUntil(b.access_until===undefined?new Date(now()+days*864e5+9*36e5).toISOString().slice(0,10):b.access_until,undefined);
+    if(!until)throw new HttpError(400,'Informe uma data de acesso válida.');
+    if(!await repo.change(b.id,'active'))throw new HttpError(400,'Não foi possível liberar este cadastro.');
+    await repo.setMembership({id:b.id,plan:reg.requested_plan,status:'active',accessUntil:until,now:now()});
+    await syncPlan({userId:b.id,plan:reg.requested_plan,status:'active',accessUntil:until,now:now()});
+    send(200,{ok:true,access_until:until,payment_plan:reg.payment_plan});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/admin/access'){
     const b=await readJson(req);if(typeof b.id!=='string'||!['block','enable','reset','delete'].includes(b.action))throw new HttpError(400,'Ação inválida.');
