@@ -90,3 +90,17 @@ test('teste grátis de 7 dias libera por 7 dias na aprovação',async()=>{
   const days=(ok.d.access_until-Date.now())/864e5;assert.ok(days>6&&days<8.1);
  }finally{await close();}
 });
+
+test('chave de monitor por computador envia snapshot e pode ser revogada',async()=>{
+ const {rq,admin,close}=await setup();
+ try{
+  const snap=()=>({source:'principal',observed_at:Math.floor(Date.now()/1000),symbol:'XAUUSD',currency:'USD',bid:1,ask:1,positions:[],deals:[]});
+  assert.equal((await rq('/v1/snapshot','x'.repeat(43),snap())).s,401);
+  const made=await rq('/v1/admin/monitors',admin,{name:'Professor 1'});assert.equal(made.s,201);
+  assert.equal((await rq('/v1/snapshot',made.d.key,snap())).s,200);
+  const list=(await rq('/v1/admin/monitors',admin)).d.monitors;assert.equal(list.length,1);assert.ok(list[0].last_seen_at);
+  assert.equal((await rq('/v1/admin/monitors/revoke',admin,{id:made.d.monitor.id})).s,200);
+  assert.equal((await rq('/v1/snapshot',made.d.key,snap())).s,401);
+  assert.equal((await rq('/v1/admin/monitors','',{name:'x'})).s,403);
+ }finally{await close();}
+});
