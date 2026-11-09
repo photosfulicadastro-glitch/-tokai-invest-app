@@ -229,6 +229,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const agent=await db.copy.agentById(b.agent_id);if(!agent)return send(404,{error:'Agente não encontrado.'});
     if(!await db.copy.copyAccess(agent.user_id,now()))return send(403,{error:'A assinatura Copy deste aluno está pausada ou expirada.'});
     const token=randomBytes(32).toString('base64url'),expires=now()+24*60*60*1000;
+    await db.auth.copyLinkVoid(agent.id,now());
     await db.auth.copyLinkCreate({id:randomUUID(),hash:createHash('sha256').update(token).digest('hex'),agentId:agent.id,now:now(),expires});
     return send(201,{url:origin.replace(/\/$/,'')+'/api/v1/copy/download/'+token,expires_at:expires});
    }
@@ -274,7 +275,8 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const [membership,agent,settings,termsAccepted]=await Promise.all([db.copy.copyMembership(user.id),db.copy.agentForUser(user.id),db.copy.settings(),db.auth.termsAccepted(user.id,TERMS_VERSION)]);
     const [events,currentLicense]=agent?await Promise.all([db.copy.eventsForAgent(agent.id,30),db.copy.currentLicenseForAgent(agent.id)]):[[],null];
     const license=currentLicense?{status:currentLicense.status,issued_at:currentLicense.issued_at,downloaded_at:currentLicense.downloaded_at,activated_at:currentLicense.activated_at,last_seen_at:currentLicense.last_seen_at}:null;
-    return send(200,{membership,agent,settings:{max_daily_loss_percent:settings.max_daily_loss_percent,execution_mode:settings.execution_mode},events,installer:{terms_accepted:termsAccepted,terms_version:TERMS_VERSION,license}});
+    const pending=agent?await db.auth.copyLinkPending(agent.id,now()):null;
+    return send(200,{membership,agent,settings:{max_daily_loss_percent:settings.max_daily_loss_percent,execution_mode:settings.execution_mode},events,installer:{terms_accepted:termsAccepted,terms_version:TERMS_VERSION,license,release:{available:!!pending,expires_at:pending?.expires_at??null}}});
    }
    if(req.url==='/v1/copy/terms'&&req.method==='POST'){
     if(!user||isAdmin||!['copy','signals_copy'].includes(user.plan_code))return send(403,{error:'Plano Copy necessário.'});
@@ -288,9 +290,8 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!copyServiceActive({user_status:'active',membership_status:membership?.status,membership_access_until:membership?.access_until},time))return send(403,{error:'Sua assinatura Copy está pausada ou expirada.'});
     if(!termsAccepted)return send(403,{error:'Aceite o Termo de Ciência de Riscos antes de baixar.'});
     if(!agent)return send(409,{error:'Sua conta MT5 ainda não foi vinculada pela equipe Tokai.'});
-    const current=await db.copy.currentLicenseForAgent(agent.id);
-    if(current?.status==='active')return send(409,{error:'Este instalador já está ativo. Solicite à equipe Tokai a substituição da licença.'});
-    if(current?.status==='issued')await db.copy.revokeLicenses({agentId:agent.id,now:time});
+    if(!await db.auth.copyLinkConsumeForAgent(agent.id,time))return send(403,{error:'O download ainda não foi liberado pela equipe Tokai. Peça uma liberação.'});
+    await db.copy.revokeLicenses({agentId:agent.id,now:time});
     const license=randomBytes(32).toString('base64url');
     const issued=await db.copy.issueLicense({id:randomUUID(),agentId:agent.id,licenseHash:createHash('sha256').update(license).digest('hex'),now:time});
     await db.copy.markLicenseDownloaded({id:issued.id,now:time});
