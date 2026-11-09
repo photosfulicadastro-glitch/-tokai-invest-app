@@ -192,3 +192,12 @@ test('link de download do monitor é de uso único, expira e não precisa de log
   assert.equal((await fetch(base+'/v1/monitor/download/'+'x'.repeat(43))).status,410);
  }finally{await close();}
 });
+
+test('snapshot com horário da corretora (monitor 1.30) é aceito e guardado',async()=>{
+ const {rq,admin,ingest,close}=await setup();
+ try{
+  const t=Math.floor(Date.now()/1000);
+  assert.equal((await rq('/v1/snapshot',ingest,{source:'principal',observed_at:t,broker_time:t+10800,symbol:'XAUUSD',currency:'USD',bid:1,ask:1,positions:[],deals:[]})).s,200);
+  assert.equal((await rq('/v1/state',admin)).d.state.broker_time,t+10800);
+ }finally{await close();}
+});

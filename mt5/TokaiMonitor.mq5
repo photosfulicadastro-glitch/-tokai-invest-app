@@ -1,5 +1,5 @@
 #property strict
-#property version "1.20"
+#property version "1.30"
 // Monitor somente leitura. Instalar em gráfico separado do robô.
 input string ApiUrl="";
 input string IngestToken="";
@@ -58,8 +58,8 @@ void OnTimer(){
   ps+="{\"id\":"+ID((ulong)PositionGetInteger(POSITION_IDENTIFIER))+",\"side\":"+Q(PositionGetInteger(POSITION_TYPE)==POSITION_TYPE_BUY?"BUY":"SELL")+",\"volume\":"+N(PositionGetDouble(POSITION_VOLUME))+",\"price\":"+N(PositionGetDouble(POSITION_PRICE_OPEN))+",\"sl\":"+N(PositionGetDouble(POSITION_SL))+",\"tp\":"+N(PositionGetDouble(POSITION_TP))+",\"profit\":"+N(PositionGetDouble(POSITION_PROFIT))+"}";
  }
  MqlTick tick;if(!SymbolInfoTick(GoldSymbol,tick))return;
- string payload="{\"source\":"+Q(Source)+",\"symbol\":"+Q(GoldSymbol)+",\"currency\":"+Q(AccountInfoString(ACCOUNT_CURRENCY))+",\"observed_at\":"+IntegerToString(TimeGMT())+",\"bid\":"+N(tick.bid)+",\"ask\":"+N(tick.ask)+",\"positions\":["+ps+"],\"deals\":["+ds+"]}";
- bool sendCandles=lastCandlesSent==0 || GetTickCount64()-lastCandlesSent>=10000;
+ string payload="{\"source\":"+Q(Source)+",\"symbol\":"+Q(GoldSymbol)+",\"currency\":"+Q(AccountInfoString(ACCOUNT_CURRENCY))+",\"observed_at\":"+IntegerToString(TimeGMT())+",\"broker_time\":"+IntegerToString(TimeCurrent())+",\"bid\":"+N(tick.bid)+",\"ask\":"+N(tick.ask)+",\"positions\":["+ps+"],\"deals\":["+ds+"]}";
+ bool sendCandles=lastCandlesSent==0 || GetTickCount64()-lastCandlesSent>=5000;
  if(sendCandles){
  string candles="{\"M1\":"+CandleSeries(PERIOD_M1)+",\"M5\":"+CandleSeries(PERIOD_M5)+",\"M15\":"+CandleSeries(PERIOD_M15)+"}";
  payload=StringSubstr(payload,0,StringLen(payload)-1)+",\"candles\":"+candles+"}";
