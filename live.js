@@ -342,8 +342,10 @@ function bindChart(){
  label();
 }
 function arrangeLandscapeChartControls(){if(!chartExpanded||!window.matchMedia('(min-width:651px) and (max-width:1180px) and (orientation:landscape)').matches)return;const toolbar=document.querySelector('.chart-expanded .chart-toolbar'),controls=document.querySelector('.chart-expanded .chart-controls'),status=toolbar?.querySelector('.chart-status');if(toolbar&&controls&&status)toolbar.insertBefore(controls,status);}
+let selectHold=false;
 function render(){
  if(!token||!identity||!data){login();return;}
+ if(selectHold)return;
  updateNav();if(!nav.some(n=>n[0]===page))page=nav[0]?.[0]||'home';
  const online=data.online&&!error&&Date.now()-data.received_at<30000;
  lastCandleStale=!!data.state?.candles_received_at&&Date.now()-data.state.candles_received_at>30000;
@@ -393,6 +395,7 @@ async function refresh(force=true){
 // One request at a time; hidden tabs stop polling. Offline/error retries stay at 1s.
 let nextRefreshAt=0;
 setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}},500);
+document.addEventListener('focusin',e=>{if(e.target?.tagName==='SELECT')selectHold=true;});document.addEventListener('change',e=>{if(e.target?.tagName==='SELECT')selectHold=false;},true);document.addEventListener('focusout',e=>{if(e.target?.tagName==='SELECT'){selectHold=false;setTimeout(render,80);}});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&chartExpanded&&window.innerWidth>650){chartExpanded=false;render();}else if(document.fullscreenElement&&chartExpanded){setTimeout(render,120);}});document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});let chartOrientationTimer;if(typeof window.addEventListener==='function')window.addEventListener('resize',()=>{if(chartExpanded||page==='market'||page==='home'){clearTimeout(chartOrientationTimer);chartOrientationTimer=setTimeout(render,120);}});
 if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class="empty">Verificando acesso…</div>';refresh();}else login();
 
