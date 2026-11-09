@@ -6,9 +6,9 @@ import {join} from 'node:path';
 import {createApi} from '../server/server.mjs';
 import {sqliteStore} from '../server/storage.mjs';
 const TERMS='signals-copy-risk-v2',PASSWORD='Senha9!xy';
-async function setup(){
+async function setup(opts={}){
  const dir=mkdtempSync(join(tmpdir(),'tokai-audit-')),storage=sqliteStore(join(dir,'a.sqlite')),admin='a'.repeat(40),ingest='i'.repeat(40);
- const server=createApi({storage,viewerToken:admin,ingestToken:ingest,origin:'https://sinais.tokaiinvest.jp'});
+ const server=createApi({storage,viewerToken:admin,ingestToken:ingest,origin:'https://sinais.tokaiinvest.jp',...opts});
  await new Promise(r=>server.listen(0,'127.0.0.1',r));
  const base='http://127.0.0.1:'+server.address().port;
  const rq=async(path,token='',body)=>{const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});const ct=r.headers.get('content-type')||'';return {s:r.status,d:ct.includes('json')?await r.json():Buffer.from(await r.arrayBuffer())};};
@@ -141,5 +141,15 @@ test('operações ficam marcadas com o computador que as enviou primeiro',async(
   assert.equal(by['2'],'FULI – FUKUROI');
   assert.equal(by['3'],'ROBERTO – MIE');
   assert.equal(st.state.operator.name,'ROBERTO – MIE');
+ }finally{await close();}
+});
+
+test('conta-mãe padrão do servidor dispensa o login no pacote',async()=>{
+ const {rq,admin,close}=await setup({masterAccount:'41277672'});
+ try{
+  const {existsSync}=await import('node:fs');
+  assert.equal((await rq('/v1/admin/monitors',admin)).d.master_account,'41277672');
+  const r=await rq('/v1/admin/monitors/package',admin,{name:'P1'});
+  assert.equal(r.s,existsSync(new URL('../mt5/TokaiMonitor.ex5',import.meta.url))?200:503);
  }finally{await close();}
 });

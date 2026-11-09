@@ -22,6 +22,7 @@ services:
     environment:
       DATABASE_URL: ${DATABASE_URL}
       INGEST_TOKEN: ${INGEST_TOKEN}
+      MASTER_ACCOUNT: ${MASTER_ACCOUNT:-41277672}
       VIEWER_TOKEN: ${VIEWER_TOKEN}
       MT5_SOURCE: ${MT5_SOURCE:-principal}
       APP_ORIGIN: https://${PUBLIC_DOMAIN}
