@@ -111,10 +111,33 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   if(req.headers.origin&&req.headers.origin!==origin)return send(403,{error:'Origem não permitida'});
   if(req.method==='OPTIONS')return send(204,{});
   if(req.url==='/health'&&req.method==='GET'){try{await db.health();return send(200,{ok:true});}catch{return send(503,{ok:false});}}
-  const dl=/^\/v1\/monitor\/download\/([A-Za-z0-9_-]{43})$/.exec((req.url||'').split('?')[0]);
+  const dlMatch=/^\/v1\/(monitor|copy)\/download\/([A-Za-z0-9_-]{43})$/.exec((req.url||'').split('?')[0]);
+  const dl=dlMatch?[dlMatch[0],dlMatch[2]]:null,dlKind=dlMatch?.[1];
   if(dl){
    const hash=createHash('sha256').update(dl[1]).digest('hex');
    const html=(status,title,body,extra='')=>{res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"});res.end('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>TOKAI INVEST</title><style>body{font-family:system-ui,sans-serif;background:#0b1b2d;color:#e8eef5;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}main{max-width:460px;background:#10253b;border:1px solid #223348;border-radius:14px;padding:26px}h1{font-size:1.2rem;margin:0 0 10px}p{line-height:1.5;color:#b8c7d6}button{background:#f0b429;border:0;border-radius:10px;padding:12px 18px;font-weight:700;font-size:1rem;cursor:pointer}</style></head><body><main><h1>'+title+'</h1>'+body+extra+'</main></body></html>');};
+   if(dlKind==='copy'){
+    const gone=()=>html(410,'Link expirado ou já usado','<p>Peça um novo link à equipe Tokai.</p>');
+    if(req.method==='GET'){
+     const link=await db.auth.copyLinkPeek(hash,now());if(!link)return gone();
+     const agent=await db.copy.agentById(link.agent_id);if(!agent)return gone();
+     return html(200,'Copy TOKAI — conta '+esc(agent.expected_account),'<p>Este link funciona <b>uma única vez</b> e vale por 24 horas. Clique abaixo para baixar o pacote preparado para a conta <b>'+esc(agent.expected_account)+'</b> ('+esc(agent.broker_server)+') e siga o arquivo LEIA-ME.txt que vem dentro.</p><p>Ao baixar, a licença anterior desta conta deixa de funcionar.</p>','<form method="post"><button type="submit">Baixar pacote do Copy</button></form>');
+    }
+    if(req.method==='POST'){
+     const link=await db.auth.copyLinkPeek(hash,now());if(!link)return gone();
+     const agent=await db.copy.agentById(link.agent_id);if(!agent)return gone();
+     if(!await db.copy.copyAccess(agent.user_id,now()))return html(403,'Assinatura Copy inativa','<p>A assinatura Copy desta conta está pausada ou expirada. Fale com a equipe Tokai.</p>');
+     if(!await db.auth.termsAccepted(agent.user_id,TERMS_VERSION))return html(403,'Termo de risco pendente','<p>Aceite o Termo de Ciência de Riscos no painel antes de baixar o pacote.</p>');
+     const used=await db.auth.copyLinkConsume(hash,now());if(!used)return gone();
+     await db.copy.revokeLicenses({agentId:agent.id,now:now()});
+     const license=randomBytes(32).toString('base64url');
+     const issued=await db.copy.issueLicense({id:randomUUID(),agentId:agent.id,licenseHash:createHash('sha256').update(license).digest('hex'),now:now()});
+     await db.copy.markLicenseDownloaded({id:issued.id,now:now()});
+     const bundle=await installerZip({license,agent,origin});
+     return sendZip('tokai-copy-'+agent.expected_account+'.zip',bundle);
+    }
+    return html(405,'Método não permitido','');
+   }
    if(req.method==='GET'){
     const link=await db.auth.linkPeek(hash,now());
     if(!link)return html(410,'Link expirado ou já usado','<p>Peça um novo link para quem enviou este.</p>');
@@ -199,6 +222,15 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     await db.copy.markLicenseDownloaded({id:issued.id,now:now()});
     const bundle=await installerZip({license,agent,origin});
     return sendZip('tokai-copy-'+agent.expected_account+'.zip',bundle);
+   }
+   if(req.url==='/v1/admin/copy/links'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req);if(typeof b.agent_id!=='string')return send(400,{error:'Agente inválido.'});
+    const agent=await db.copy.agentById(b.agent_id);if(!agent)return send(404,{error:'Agente não encontrado.'});
+    if(!await db.copy.copyAccess(agent.user_id,now()))return send(403,{error:'A assinatura Copy deste aluno está pausada ou expirada.'});
+    const token=randomBytes(32).toString('base64url'),expires=now()+24*60*60*1000;
+    await db.auth.copyLinkCreate({id:randomUUID(),hash:createHash('sha256').update(token).digest('hex'),agentId:agent.id,now:now(),expires});
+    return send(201,{url:origin.replace(/\/$/,'')+'/api/v1/copy/download/'+token,expires_at:expires});
    }
    if(req.url==='/v1/admin/copy/licenses/revoke'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});

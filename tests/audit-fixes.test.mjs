@@ -201,3 +201,35 @@ test('snapshot com horário da corretora (monitor 1.30) é aceito e guardado',as
   assert.equal((await rq('/v1/state',admin)).d.state.broker_time,t+10800);
  }finally{await close();}
 });
+test('link do pacote Copy: uso único, 24h, não mexe no login e a licença antiga deixa de valer',async()=>{
+ let t=Date.now();
+ const {rq,admin,member,close,base}=await setup({now:()=>t});
+ try{
+  await rq('/v1/admin/copy/settings',admin,{execution_mode:'both',max_daily_loss_percent:10});
+  const a=await member('aluno.link','copy','22222222');
+  assert.equal((await rq('/v1/admin/copy/links',a.token,{agent_id:a.agent.id})).s,403);
+  assert.equal((await rq('/v1/admin/copy/links',admin,{agent_id:'nao-existe'})).s,404);
+  const made=await rq('/v1/admin/copy/links',admin,{agent_id:a.agent.id});assert.equal(made.s,201);
+  const path=new URL(made.d.url).pathname.replace(/^\/api/,'');
+  const g1=await fetch(base+path);assert.equal(g1.status,200);assert.match(await g1.text(),/Baixar pacote do Copy/);
+  assert.equal((await fetch(base+path)).status,200);
+  const p1=await fetch(base+path,{method:'POST'});assert.equal(p1.status,200);assert.equal(p1.headers.get('content-type'),'application/zip');
+  const zip1=Buffer.from(await p1.arrayBuffer());
+  assert.equal((await fetch(base+path,{method:'POST'})).status,410);
+  const body1={license:licenseFrom(zip1),account:'22222222',server:'Exness-MT5Trial3',fingerprint:'fp-AAAAAAAAAAAAAAAA'};
+  assert.equal((await rq('/v1/copy/activate','',body1)).s,200);
+  // o login do aluno continua funcionando (senha e sessão intactas)
+  assert.equal((await rq('/v1/auth/login','',{username:'aluno.link',password:PASSWORD})).s,200);
+  assert.equal((await rq('/v1/copy/me',a.token)).s,200);
+  // novo link = nova licença; a anterior é revogada
+  const made2=await rq('/v1/admin/copy/links',admin,{agent_id:a.agent.id});const path2=new URL(made2.d.url).pathname.replace(/^\/api/,'');
+  const p2=await fetch(base+path2,{method:'POST'});assert.equal(p2.status,200);const zip2=Buffer.from(await p2.arrayBuffer());
+  assert.notEqual(licenseFrom(zip2),licenseFrom(zip1));
+  assert.notEqual((await rq('/v1/copy/plan','',{...body1,equity:1000})).s,200);
+  // expirado
+  const made3=await rq('/v1/admin/copy/links',admin,{agent_id:a.agent.id});const path3=new URL(made3.d.url).pathname.replace(/^\/api/,'');
+  t+=25*60*60*1000;
+  assert.equal((await fetch(base+path3)).status,410);
+  assert.equal((await fetch(base+path3,{method:'POST'})).status,410);
+ }finally{await close();}
+});
