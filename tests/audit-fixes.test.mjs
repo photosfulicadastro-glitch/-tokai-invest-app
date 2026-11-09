@@ -109,3 +109,17 @@ test('chave de monitor por computador envia snapshot e pode ser revogada',async(
   assert.equal((await rq('/v1/admin/monitors','',{name:'x'})).s,403);
  }finally{await close();}
 });
+
+test('pacote do monitor valida entrada, exige admin e gera chave que funciona',async()=>{
+ const {rq,admin,close}=await setup();
+ try{
+  const {existsSync}=await import('node:fs');
+  const hasEx5=existsSync(new URL('../mt5/TokaiMonitor.ex5',import.meta.url));
+  assert.equal((await rq('/v1/admin/monitors/package','',{name:'P1',account:'123456'})).s,403);
+  assert.equal((await rq('/v1/admin/monitors/package',admin,{name:'',account:'123456'})).s,400);
+  assert.equal((await rq('/v1/admin/monitors/package',admin,{name:'P1',account:'abc'})).s,400);
+  const r=await rq('/v1/admin/monitors/package',admin,{name:'Professor 1',account:'123456'});
+  if(!hasEx5){assert.equal(r.s,503);assert.equal((await rq('/v1/admin/monitors',admin)).d.monitors.length,0);}
+  else{assert.equal(r.s,200);assert.equal((await rq('/v1/admin/monitors',admin)).d.monitors.length,1);}
+ }finally{await close();}
+});
