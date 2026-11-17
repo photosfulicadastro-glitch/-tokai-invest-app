@@ -64,12 +64,19 @@ CREATE TABLE IF NOT EXISTS signal_registration_payments (
  user_id TEXT PRIMARY KEY REFERENCES signal_users(id),
  payment_plan TEXT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS app_settings (
+ key TEXT PRIMARY KEY,
+ value TEXT NOT NULL,
+ updated_at BIGINT NOT NULL
+);
 CREATE INDEX IF NOT EXISTS signal_sessions_user ON signal_sessions(user_id);
 CREATE INDEX IF NOT EXISTS signal_sessions_expiry ON signal_sessions(expires_at);
 `;
 export function authRepository(query){
  const one=async(sql,args=[]) => (await query(sql,args)).rows[0];
  return {
+  settingGet:async key=>(await one('SELECT value FROM app_settings WHERE key=$1',[key]))?.value??null,
+  settingSet:(key,value,at)=>query('INSERT INTO app_settings(key,value,updated_at) VALUES($1,$2,$3) ON CONFLICT(key) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at',[key,value,at]),
   adminPassword:()=>one('SELECT * FROM admin_credentials WHERE id=1'),
   setAdminPassword:password=>query('INSERT INTO admin_credentials(id,password_hash,version) VALUES(1,$1,1) ON CONFLICT(id) DO UPDATE SET password_hash=excluded.password_hash,version=admin_credentials.version+1',[password]),
   adminSession:(hash,version,expires)=>query('INSERT INTO admin_sessions(token_hash,version,expires_at) VALUES($1,$2,$3)',[hash,version,expires]),

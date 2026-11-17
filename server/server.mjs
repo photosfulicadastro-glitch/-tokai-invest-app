@@ -1,6 +1,7 @@
 import http from 'node:http';
 import {createPush} from './push.mjs';
 import {createAuth,HttpError,readJson,TERMS_VERSION} from './auth.mjs';
+import {parseLiveSource,embedUrl} from './live-source.mjs';
 import {sqliteStore,postgresStore} from './storage.mjs';
 import {createHash,timingSafeEqual,randomBytes,randomUUID} from 'node:crypto';
 import {readFile,access} from 'node:fs/promises';
@@ -223,6 +224,16 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const bundle=await installerZip({license,agent,origin});
     return sendZip('tokai-copy-'+agent.expected_account+'.zip',bundle);
    }
+   if(req.url==='/v1/admin/live'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req);const old=JSON.parse(await db.auth.settingGet('live')||'{}');
+    let source=old.source||null;
+    if(typeof b.source==='string'){const r=parseLiveSource(b.source);if(r.error)return send(400,{error:r.error});source=r;}
+    const enabled=typeof b.enabled==='boolean'?b.enabled:!!old.enabled;
+    if(enabled&&!source)return send(400,{error:'Informe o link da transmissão antes de ligar o Ao vivo.'});
+    await db.auth.settingSet('live',JSON.stringify({source,enabled}),now());
+    return send(200,{enabled,embed_url:enabled?embedUrl(source):null,source:source?(source.kind==='channel'?'channel/':'')+source.id:'',kind:source?.kind||null});
+   }
    if(req.url==='/v1/admin/copy/links'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const b=await readJson(req);if(typeof b.agent_id!=='string')return send(400,{error:'Agente inválido.'});
@@ -352,6 +363,10 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
    if((req.url==='/v1/state'||req.url.startsWith('/v1/push'))&&user&&!signalsPlan)return send(403,{error:'Seu plano não inclui o painel de sinais.'});
    if(await (await pushReady).route(req,send,user))return;
    if(req.url==='/v1/me'&&req.method==='GET')return send(200,{user});
+   if(req.url==='/v1/live'&&req.method==='GET'){
+    const cfg=JSON.parse(await db.auth.settingGet('live')||'{}');const src=cfg.source;
+    return send(200,{enabled:!!(cfg.enabled&&src),embed_url:cfg.enabled?embedUrl(src):null,...(isAdmin?{source:src?(src.kind==='channel'?'channel/':'')+src.id:'',kind:src?.kind||null}:{})});
+   }
    if(ingestion){
     const s=await readJson(req,2_000_000);validate(s,source);
     if(historyStart>0)s.deals=s.deals.filter(d=>Number(d.time)>=historyStart);
