@@ -90,3 +90,28 @@ test('plano Copy cria agente e recusa conta MT5 já usada por outro aluno',async
   assert.equal((await t.call('PUT','/v1/integration/users/p2',{...c,email:'b@x.com',name:'B'})).s,409);
  }finally{await t.close();}
 });
+test('Copy: com COPY_AUTO_RELEASE o aluno baixa o primeiro pacote sozinho; reinstalar exige liberação',async()=>{
+ const run=async auto=>{
+  const dir=mkdtempSync(join(tmpdir(),'tokai-auto-')),storage=sqliteStore(join(dir,'a.sqlite'));
+  const server=createApi({storage,viewerToken:admin,ingestToken:'i'.repeat(40),origin:'https://sinais.tokaiinvest.jp',integration:{keyId:KEY,secret:SECRET},copyAutoRelease:auto});
+  await new Promise(r=>server.listen(0,'127.0.0.1',r));const base='http://127.0.0.1:'+server.address().port;
+  const put=async(b)=>{const raw=JSON.stringify(b),path='/v1/integration/users/p1',ts=Math.floor(Date.now()/1000);return (await fetch(base+path,{method:'PUT',headers:{'X-Key-Id':KEY,'X-Timestamp':String(ts),'X-Signature':signRequest(SECRET,{timestamp:ts,method:'PUT',path,body:raw}),'Idempotency-Key':'k-'+Math.random().toString(36).slice(2),'Content-Type':'application/json'},body:raw})).status;};
+  const post=async(path,token,body)=>{const r=await fetch(base+path,{method:body===undefined?'GET':'POST',headers:{Authorization:'Bearer '+token,'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body)});return {s:r.status,ct:r.headers.get('content-type'),d:r.headers.get('content-type')?.includes('json')?await r.json():null};};
+  try{
+   assert.equal(await put(body({plan:'copy',mt5_account:'123456',broker_server:'Exness-MT5Real',billing_state:'active'})),200);
+   const raw=JSON.stringify({}),path='/v1/integration/users/p1/sso',ts=Math.floor(Date.now()/1000);
+   const sso=await (await fetch(base+path,{method:'POST',headers:{'X-Key-Id':KEY,'X-Timestamp':String(ts),'X-Signature':signRequest(SECRET,{timestamp:ts,method:'POST',path,body:raw}),'Idempotency-Key':'k-'+Math.random().toString(36).slice(2),'Content-Type':'application/json'},body:raw})).json();
+   const token=(await post('/v1/auth/sso','',{ticket:/#sso=(.+)$/.exec(sso.url)[1]})).d.token;
+   assert.equal((await post('/v1/copy/terms',token,{terms_accepted:true,terms_version:'signals-copy-risk-v2'})).s,200);
+   const me=await post('/v1/copy/me',token);
+   assert.equal(me.d.installer.release.available,auto);
+   const dl=await post('/v1/copy/installer',token,{});
+   if(!auto){assert.equal(dl.s,403);return;}
+   assert.equal(dl.s,200);assert.equal(dl.ct,'application/zip');
+   assert.equal((await post('/v1/copy/me',token)).d.installer.release.available,false);
+   assert.equal((await post('/v1/copy/installer',token,{})).s,403);
+   await put(body({plan:'copy',status:'paused',mt5_account:'123456',broker_server:'Exness-MT5Real'}));
+  }finally{await new Promise(r=>server.close(r));rmSync(dir,{recursive:true});}
+ };
+ await run(false);await run(true);
+});
