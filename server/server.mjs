@@ -93,7 +93,7 @@ async function installerZip({license,agent,origin}){
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
 const copyServiceActive=(entry,time)=>entry?.user_status==='active'&&entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
 const copyAccessUntil=value=>{if(value===null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;const time=Date.parse(value+'T14:59:59.999Z');return Number.isSafeInteger(time)&&time>0?time:undefined;};
-export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',masterAccount='',teamNames=[],origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now(),integration=null}={}) {
+export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',masterAccount='',teamNames=[],origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now(),integration=null,copyAutoRelease=process.env.COPY_AUTO_RELEASE==='1'}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
  const syncPlan=async({userId,plan,status,accessUntil,now:time})=>await db.copy.setCopyMembership({userId,status:(plan==='copy'||plan==='signals_copy')&&status==='active'?'active':'paused',accessUntil,now:time});
@@ -289,7 +289,8 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const [events,currentLicense]=agent?await Promise.all([db.copy.eventsForAgent(agent.id,30),db.copy.currentLicenseForAgent(agent.id)]):[[],null];
     const license=currentLicense?{status:currentLicense.status,issued_at:currentLicense.issued_at,downloaded_at:currentLicense.downloaded_at,activated_at:currentLicense.activated_at,last_seen_at:currentLicense.last_seen_at}:null;
     const pending=agent?await db.auth.copyLinkPending(agent.id,now()):null;
-    return send(200,{membership,agent,settings:{max_daily_loss_percent:settings.max_daily_loss_percent,execution_mode:settings.execution_mode},events,installer:{terms_accepted:termsAccepted,terms_version:TERMS_VERSION,license,release:{available:!!pending,expires_at:pending?.expires_at??null}}});
+    const autoFirst=!!(copyAutoRelease&&agent&&termsAccepted&&!pending&&copyServiceActive({user_status:'active',membership_status:membership?.status,membership_access_until:membership?.access_until},now())&&!await db.copy.anyLicense(agent.id));
+    return send(200,{membership,agent,settings:{max_daily_loss_percent:settings.max_daily_loss_percent,execution_mode:settings.execution_mode},events,installer:{terms_accepted:termsAccepted,terms_version:TERMS_VERSION,license,release:{available:!!pending||autoFirst,auto:autoFirst,expires_at:pending?.expires_at??null}}});
    }
    if(req.url==='/v1/copy/terms'&&req.method==='POST'){
     if(!user||isAdmin||!['copy','signals_copy'].includes(user.plan_code))return send(403,{error:'Plano Copy necessário.'});
@@ -303,7 +304,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(!copyServiceActive({user_status:'active',membership_status:membership?.status,membership_access_until:membership?.access_until},time))return send(403,{error:'Sua assinatura Copy está pausada ou expirada.'});
     if(!termsAccepted)return send(403,{error:'Aceite o Termo de Ciência de Riscos antes de baixar.'});
     if(!agent)return send(409,{error:'Sua conta MT5 ainda não foi vinculada pela equipe Tokai.'});
-    if(!await db.auth.copyLinkConsumeForAgent(agent.id,time))return send(403,{error:'O download ainda não foi liberado pela equipe Tokai. Peça uma liberação.'});
+    if(!await db.auth.copyLinkConsumeForAgent(agent.id,time)&&!(copyAutoRelease&&!await db.copy.anyLicense(agent.id)))return send(403,{error:'O download ainda não foi liberado pela equipe Tokai. Peça uma liberação.'});
     await db.copy.revokeLicenses({agentId:agent.id,now:time});
     const license=randomBytes(32).toString('base64url');
     const issued=await db.copy.issueLicense({id:randomUUID(),agentId:agent.id,licenseHash:createHash('sha256').update(license).digest('hex'),now:time});
