@@ -1,5 +1,6 @@
 'use strict';
 const root=document.getElementById('root');
+let liveInfo=null,liveFetched=false,liveSize='mini',liveClosed=false,adminLive=null,liveShownUrl='',liveAdminMsg='';
 let page='home',token='',data=null,error='',busy=false,tf='M5',histOp='all',histRange='today';
 let nav=[];
 let followCandles=true,chartScrollLeft=0,lastCandleStale=false,chartZoom=1,chartYScale=1,chartYPan=0,chartExpanded=false,chartBoxW=0,chartBoxH=0,bbOn3=true,bbOn4=true;const BB_PERIOD=20;
@@ -74,7 +75,7 @@ async function downloadStudentCopyInstaller(){
  });
 }
 function remember(){try{if(identity?.role==='reader')sessionStorage.setItem('tokai.session',token);else sessionStorage.removeItem('tokai.session');}catch{}}
-function clearAccess(){token='';identity=null;data=null;page='home';followCandles=true;chartScrollLeft=0;adminUsers=[];inviteResult=null;adminMessage='';remember();updateNav();}
+function clearAccess(){liveInfo=null;liveFetched=false;token='';identity=null;data=null;page='home';followCandles=true;chartScrollLeft=0;adminUsers=[];inviteResult=null;adminMessage='';remember();updateNav();syncLive();}
 async function logout(){try{await window.tokaiPush?.disable(api);}catch{}const previous=token;clearAccess();error='';login();try{await api('/v1/auth/logout',{},previous);}catch{}}
 function riskTerms(){
  return `<fieldset class="terms-box"><legend>Termo de Ciência de Riscos</legend><div class="terms-scroll"><p>Operações financeiras e Copy Trading envolvem risco de perdas. Não há garantia de resultado, execução ou rentabilidade.</p><p>O Copy Trading só opera com o seu computador (ou VPS) ligado, o MetaTrader 5 aberto e logado e o robô ativo. Com o computador desligado, nenhuma operação é copiada e o encerramento automático por perda diária não funciona.</p><p>A TOKAI INVEST não solicita senha da corretora. Você é responsável por sua conta, limite, corretora e decisões de investimento.</p><p>Leia o <a href="termos-de-risco.html" target="_blank" rel="noopener">Termo de Ciência de Riscos completo</a> antes de continuar.</p></div><label class="terms-check"><input id="terms-accepted" type="checkbox" required> Li, compreendi os riscos e concordo com o termo.</label></fieldset>`;
@@ -126,12 +127,13 @@ function usersPage(){
  const activeMonitors=adminMonitors.filter(m=>!m.revoked_at),revokedCount=adminMonitors.length-activeMonitors.length;
  const computerNames=[...adminTeamNames,...activeMonitors.map(m=>m.name).filter(n=>!adminTeamNames.includes(n))];
  const monitors=card('Monitores (um por computador)','<p class="sub">Cada professor usa o seu próprio computador. Clique em <b>Gerar link (24h)</b> e mande o link para o professor: ele baixa o pacote sem acessar o painel (o link vale uma vez e por 24 horas). <b>Baixar pacote</b> baixa o ZIP aqui, no seu computador. A conta-mãe '+esc(masterAccount||'informada')+' já vai preenchida. Gerar novo pacote ou link para o mesmo computador desativa a chave anterior.</p>'+(monitorLinkResult?'<div class="alert" role="status"><b>Link de '+esc(monitorLinkResult.name)+' (uso único, vale até '+esc(new Date(monitorLinkResult.expires_at).toLocaleString('pt-BR'))+'):</b><br><input readonly id="monitor-link-field" value="'+esc(monitorLinkResult.url)+'" style="width:100%"><button class="btn" id="monitor-link-copy" type="button" style="margin-top:8px">Copiar link</button></div>':'')+'<div class="tablewrap"><table class="table"><thead><tr><th>COMPUTADOR</th><th>SITUAÇÃO</th><th></th></tr></thead><tbody>'+computerNames.map(n=>{const m=activeMonitors.find(x=>x.name===n),live=m&&m.last_seen_at&&Date.now()-m.last_seen_at<120000;const pill=!m?'<span class="pill">Pacote ainda não gerado</span>':live?'<span class="pill green">● Ativo — instalado e enviando</span>':m.last_seen_at?'<span class="pill gold">Instalado · sem envio agora</span> <small>último: '+esc(when(m.last_seen_at))+'</small>':'<span class="pill gold">Aguardando instalação</span>';return '<tr><td>'+esc(n)+'</td><td>'+pill+'</td><td style="white-space:nowrap"><button class="btn" data-link="'+esc(n)+'" data-has-key="'+(m?'1':'0')+'">'+(m?'Novo link (24h)':'Gerar link (24h)')+'</button> <button class="btn" data-package="'+esc(n)+'" data-has-key="'+(m?'1':'0')+'">Baixar pacote</button> '+(m?'<button class="btn danger" data-monitor-revoke="'+esc(m.id)+'">Revogar</button>':'')+'</td></tr>';}).join('')+'</tbody></table></div><form id="monitor-package-form" style="margin-top:14px"><div class="field"><label for="monitor-package-name">Adicionar outro computador (nome)</label><input id="monitor-package-name" required maxlength="80" placeholder="Ex.: NOME – CIDADE"></div>'+(masterAccount?'':'<div class="field"><label for="monitor-package-account">Login MT5 da conta-mãe</label><input id="monitor-package-account" required inputmode="numeric" pattern="[0-9]{3,12}" placeholder="Somente números"></div>')+'<button class="btn">Baixar pacote do monitor</button></form>'+(revokedCount?'<p class="sub">'+revokedCount+' chave(s) revogada(s) não aparecem aqui.</p>':''));
- return heading('Acessos aos sinais','Cadastros públicos, convites e controle dos alunos. Dados de Copy informados pelo aluno chegam automaticamente nesta lista.')+admin+monitors+(adminMessage?`<div class="alert" role="status">${esc(adminMessage)}</div>`:'')+tabs+(accessView==='invite'?(invitePanel()+invite):students)+'<p class="sub">Bloquear encerra o acesso nas próximas consultas. Redefinir senha invalida a senha e as sessões atuais do aluno (gera um convite novo). Para só baixar o pacote do Copy de novo, use Copy Trading → Gerar link do pacote (24h).</p>';
+ return heading('Acessos aos sinais','Cadastros públicos, convites e controle dos alunos. Dados de Copy informados pelo aluno chegam automaticamente nesta lista.')+admin+monitors+liveAdminCard()+(adminMessage?`<div class="alert" role="status">${esc(adminMessage)}</div>`:'')+tabs+(accessView==='invite'?(invitePanel()+invite):students)+'<p class="sub">Bloquear encerra o acesso nas próximas consultas. Redefinir senha invalida a senha e as sessões atuais do aluno (gera um convite novo). Para só baixar o pacote do Copy de novo, use Copy Trading → Gerar link do pacote (24h).</p>';
 }
 let adminMonitors=[],monitorKeyResult=null,masterAccount='',adminTeamNames=[],monitorLinkResult=null;
 let lastMonitorSig='';setInterval(async()=>{if(page!=='users'||!token||document.activeElement?.tagName==='INPUT')return;try{const r=await api('/v1/admin/monitors');const sig=JSON.stringify(r.monitors.map(m=>[m.id,m.last_seen_at,m.revoked_at,!!(m.last_seen_at&&Date.now()-m.last_seen_at<120000)]));if(sig!==lastMonitorSig){lastMonitorSig=sig;adminMonitors=r.monitors;render();}}catch{}},15000);
-async function loadUsers(){try{adminUsers=(await api('/v1/admin/users')).users;try{{const r=await api('/v1/admin/monitors');adminMonitors=r.monitors;masterAccount=r.master_account||'';adminTeamNames=r.team_names||[];}}catch{}if(page==='users')render();}catch(e){adminMessage=e.message;if(page==='users')render();}}
+async function loadUsers(){try{adminUsers=(await api('/v1/admin/users')).users;try{adminLive=await api('/v1/live');}catch{}try{{const r=await api('/v1/admin/monitors');adminMonitors=r.monitors;masterAccount=r.master_account||'';adminTeamNames=r.team_names||[];}}catch{}if(page==='users')render();}catch(e){adminMessage=e.message;if(page==='users')render();}}
 function bindAdmin(){
+ bindLiveAdmin();
  document.querySelectorAll('[data-access-view]').forEach(b=>b.onclick=()=>{accessView=b.dataset.accessView;render();});
  document.getElementById('admin-password-form')?.addEventListener('submit',async e=>{e.preventDefault();const password=document.getElementById('admin-new').value;if(password!==document.getElementById('admin-repeat').value){adminMessage='As senhas não coincidem.';render();return;}e.target.querySelector('button').disabled=true;try{await api('/v1/admin/password',{password,current:document.getElementById('admin-current').value});clearAccess();authMode='admin';error='Senha salva. Entre com sua nova senha administrativa.';login();}catch(e){adminMessage=e.message;render();}});
 
@@ -395,6 +397,7 @@ function render(){
  document.getElementById('refresh').onclick=()=>page==='users'?loadUsers():page==='copy'?loadCopy():refresh();
  if(page==='users')bindAdmin();
  window.tokaiPush?.bind(api,render);
+ syncLive();
  document.querySelectorAll('#logout,#header-logout').forEach(b=>b.onclick=logout);
 }
 async function refresh(force=true){
@@ -412,9 +415,45 @@ async function refresh(force=true){
 }
 // One request at a time; hidden tabs stop polling. Offline/error retries stay at 1s.
 let nextRefreshAt=0;
-setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}},500);
+setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}liveTick();},500);
 document.addEventListener('focusin',e=>{if(e.target?.tagName==='SELECT')selectHold=true;});document.addEventListener('change',e=>{if(e.target?.tagName==='SELECT')selectHold=false;},true);document.addEventListener('focusout',e=>{if(e.target?.tagName==='SELECT'){selectHold=false;if(token&&identity&&data)setTimeout(render,80);}});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&chartExpanded&&window.innerWidth>650){chartExpanded=false;render();}else if(document.fullscreenElement&&chartExpanded){setTimeout(render,120);}});document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});let chartOrientationTimer;if(typeof window.addEventListener==='function')window.addEventListener('resize',()=>{if(token&&identity&&data&&(chartExpanded||page==='market'||page==='home')){clearTimeout(chartOrientationTimer);chartOrientationTimer=setTimeout(render,120);}});
 if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class="empty">Verificando acesso…</div>';refresh();}else login();
 
 
+
+/* ===== Janela AO VIVO (YouTube) — fica fora do #root para o vídeo não recarregar a cada atualização da tela ===== */
+function liveEl(){
+ let w=document.getElementById('live-window');if(w)return w;
+ w=document.createElement('div');w.id='live-window';w.hidden=true;
+ w.innerHTML='<div class="lw-bar"><span class="lw-dot"></span><b>AO VIVO</b><span class="lw-spacer"></span><button type="button" id="lw-size" aria-label="Ampliar">Ampliar</button><button type="button" id="lw-min" aria-label="Minimizar">–</button></div><div class="lw-video"><iframe title="Transmissão ao vivo" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe></div>';
+ document.body.appendChild(w);
+ w.querySelector('#lw-size').onclick=()=>{liveSize=liveSize==='big'?'mini':'big';liveClosed=false;syncLive();};
+ w.querySelector('#lw-min').onclick=()=>{liveClosed=!liveClosed;syncLive();};
+ return w;
+}
+function syncLive(){
+ const want=!!(token&&identity&&page==='market'&&liveInfo?.enabled&&liveInfo.embed_url);
+ const w=document.getElementById('live-window')||(want?liveEl():null);if(!w)return;
+ if(!want){if(liveShownUrl){w.querySelector('iframe').src='about:blank';liveShownUrl='';}w.hidden=true;return;}
+ w.hidden=false;w.classList.toggle('lw-big',liveSize==='big'&&!liveClosed);w.classList.toggle('lw-closed',liveClosed);
+ w.querySelector('#lw-size').textContent=liveSize==='big'?'Reduzir':'Ampliar';
+ w.querySelector('#lw-min').textContent=liveClosed?'Mostrar':'–';
+ const f=w.querySelector('iframe'),url=liveClosed?'':liveInfo.embed_url;
+ if(url!==liveShownUrl){liveShownUrl=url;f.src=url||'about:blank';}
+}
+async function loadLive(){
+ if(!token||!identity)return;
+ try{const r=await api('/v1/live');liveInfo=r;liveFetched=true;if(r.enabled===false)liveClosed=false;syncLive();}catch{liveFetched=true;}
+}
+let liveNextAt=0;
+function liveTick(){if(!token||!identity||Date.now()<liveNextAt)return;if(page==='market'||!liveFetched){liveNextAt=Date.now()+(liveFetched?15000:1500);loadLive();}}
+function liveAdminCard(){
+ const a=adminLive||{},on=!!a.enabled;
+ return card('Transmissão ao vivo (aba Mercado)','<p class="sub">Mostra uma janelinha <b>AO VIVO</b> na aba Mercado dos alunos. Inicie a transmissão no YouTube (pelo OBS) e cole aqui o <b>link da transmissão</b> (youtube.com/watch?v=… ou youtube.com/live/…). Se a transmissão for <b>pública</b>, pode usar o link do canal no formato youtube.com/channel/UC…: aí não precisa trocar a cada live. Links com @nome não funcionam.</p><div class="field"><label for="live-source">Link da transmissão ou ID</label><input id="live-source" type="text" autocomplete="off" placeholder="https://www.youtube.com/watch?v=..." value="'+esc(a.source||'')+'"></div><div class="row"><span>Status: <b class="'+(on?'green':'muted')+'">'+(on?'Ao vivo ligado (alunos veem a janela)':'Desligado')+'</b></span></div><div class="tools"><button class="btn goldbtn" type="button" id="live-save">Salvar e ligar</button><button class="btn" type="button" id="live-toggle">'+(on?'Desligar':'Ligar')+'</button></div>'+(liveAdminMsg?'<p class="sub" role="status">'+esc(liveAdminMsg)+'</p>':''));
+}
+function bindLiveAdmin(){
+ const act=async body=>{liveAdminMsg='';try{adminLive=await api('/v1/admin/live',body);liveInfo={enabled:adminLive.enabled,embed_url:adminLive.embed_url};liveAdminMsg=adminLive.enabled?'Ao vivo ligado.':'Ao vivo desligado.';}catch(e){liveAdminMsg=e.message;}render();};
+ document.getElementById('live-save')?.addEventListener('click',()=>act({source:document.getElementById('live-source').value,enabled:true}));
+ document.getElementById('live-toggle')?.addEventListener('click',()=>act({enabled:!(adminLive&&adminLive.enabled),...(document.getElementById('live-source').value.trim()&&!(adminLive&&adminLive.enabled)?{source:document.getElementById('live-source').value}:{})}));
+}
