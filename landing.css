@@ -175,3 +175,6 @@ td{padding:14px 8px;border-bottom:1px solid #ffffff0d}
  .phone{width:240px}
 }
 @media(prefers-reduced-motion:reduce){html{scroll-behavior:auto}*{transition:none!important}}
+
+.lang-switch{border:1px solid rgba(160,200,255,.35);background:transparent;color:inherit;border-radius:8px;padding:8px 12px;font:inherit;font-weight:800;font-size:13px;letter-spacing:.5px;cursor:pointer}
+.lang-nav{margin-left:8px}
