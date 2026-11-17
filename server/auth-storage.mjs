@@ -69,6 +69,36 @@ CREATE TABLE IF NOT EXISTS app_settings (
  value TEXT NOT NULL,
  updated_at BIGINT NOT NULL
 );
+CREATE TABLE IF NOT EXISTS portal_links (
+ user_id TEXT PRIMARY KEY REFERENCES signal_users(id),
+ portal_user_id TEXT NOT NULL UNIQUE,
+ email TEXT,
+ locale TEXT,
+ is_tokai_student INTEGER NOT NULL DEFAULT 0,
+ billing_state TEXT,
+ updated_at BIGINT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS portal_links_updated ON portal_links(updated_at);
+CREATE TABLE IF NOT EXISTS sso_tickets (
+ token_hash TEXT PRIMARY KEY,
+ user_id TEXT NOT NULL REFERENCES signal_users(id),
+ expires_at BIGINT NOT NULL,
+ used_at BIGINT
+);
+CREATE TABLE IF NOT EXISTS integration_idempotency (
+ key TEXT PRIMARY KEY,
+ status INTEGER NOT NULL,
+ body TEXT NOT NULL,
+ created_at BIGINT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS integration_audit (
+ id TEXT PRIMARY KEY,
+ at BIGINT NOT NULL,
+ key_id TEXT NOT NULL,
+ method TEXT NOT NULL,
+ path TEXT NOT NULL,
+ status INTEGER NOT NULL
+);
 CREATE INDEX IF NOT EXISTS signal_sessions_user ON signal_sessions(user_id);
 CREATE INDEX IF NOT EXISTS signal_sessions_expiry ON signal_sessions(expires_at);
 `;
@@ -82,7 +112,7 @@ export function authRepository(query){
   adminSession:(hash,version,expires)=>query('INSERT INTO admin_sessions(token_hash,version,expires_at) VALUES($1,$2,$3)',[hash,version,expires]),
   resolveAdmin:(hash,now)=>one('SELECT s.token_hash FROM admin_sessions s JOIN admin_credentials a ON a.version=s.version WHERE s.token_hash=$1 AND s.expires_at>$2',[hash,now]),
   remove:async id=>{await query("UPDATE signal_users SET status='blocked',version=version+1 WHERE id=$1",[id]);await query('DELETE FROM signal_sessions WHERE user_id=$1',[id]);await query('DELETE FROM push_subscriptions WHERE user_id=$1',[id]);await query('DELETE FROM copy_agent_events WHERE agent_id IN (SELECT id FROM copy_agents WHERE user_id=$1)',[id]);await query('DELETE FROM copy_licenses WHERE agent_id IN (SELECT id FROM copy_agents WHERE user_id=$1)',[id]);await query('DELETE FROM copy_agents WHERE user_id=$1',[id]);await query('DELETE FROM copy_memberships WHERE user_id=$1',[id]);await query('DELETE FROM signal_memberships WHERE user_id=$1',[id]);await query('DELETE FROM signal_terms_acceptances WHERE user_id=$1',[id]);await query('DELETE FROM signal_registration_payments WHERE user_id=$1',[id]);await query('DELETE FROM signal_registrations WHERE user_id=$1',[id]);return one('DELETE FROM signal_users WHERE id=$1 RETURNING id',[id]);},
-  list:async()=> (await query("SELECT u.id,u.username,u.display_name,u.status,u.created_at,m.plan_code,m.status AS membership_status,m.access_until,r.requested_plan,r.mt5_account AS requested_mt5_account,r.broker_server AS requested_broker_server,r.created_at AS registration_created_at,rp.payment_plan,t.accepted_at AS terms_accepted_at,t.terms_version FROM signal_users u LEFT JOIN signal_memberships m ON m.user_id=u.id LEFT JOIN signal_registrations r ON r.user_id=u.id LEFT JOIN signal_registration_payments rp ON rp.user_id=u.id LEFT JOIN signal_terms_acceptances t ON t.user_id=u.id AND t.terms_version='signals-copy-risk-v2' ORDER BY u.created_at DESC LIMIT 500",[])).rows,
+  list:async()=> (await query("SELECT u.id,u.username,u.display_name,u.status,u.created_at,m.plan_code,m.status AS membership_status,m.access_until,r.requested_plan,r.mt5_account AS requested_mt5_account,r.broker_server AS requested_broker_server,r.created_at AS registration_created_at,rp.payment_plan,t.accepted_at AS terms_accepted_at,t.terms_version,pl.is_tokai_student,pl.billing_state,pl.portal_user_id FROM signal_users u LEFT JOIN portal_links pl ON pl.user_id=u.id LEFT JOIN signal_memberships m ON m.user_id=u.id LEFT JOIN signal_registrations r ON r.user_id=u.id LEFT JOIN signal_registration_payments rp ON rp.user_id=u.id LEFT JOIN signal_terms_acceptances t ON t.user_id=u.id AND t.terms_version='signals-copy-risk-v2' ORDER BY u.created_at DESC LIMIT 500",[])).rows,
   pendingRegistration:id=>one("SELECT u.id,u.status,r.requested_plan,COALESCE(rp.payment_plan,'monthly') AS payment_plan FROM signal_users u JOIN signal_registrations r ON r.user_id=u.id LEFT JOIN signal_registration_payments rp ON rp.user_id=u.id WHERE u.id=$1",[id]),
   monitorList:async()=>(await query('SELECT id,name,created_at,revoked_at,last_seen_at FROM monitor_keys ORDER BY created_at DESC LIMIT 100',[])).rows,
   monitorCreate:m=>one('INSERT INTO monitor_keys(id,name,token_hash,created_at) VALUES($1,$2,$3,$4) RETURNING id,name,created_at',[m.id,m.name,m.hash,m.now]),
@@ -111,6 +141,20 @@ export function authRepository(query){
   session:(hash,user,expires,now)=>one("INSERT INTO signal_sessions(token_hash,user_id,user_version,expires_at) SELECT $1,u.id,u.version,$2 FROM signal_users u WHERE u.id=$3 AND u.password_hash=$4 AND u.status='active' AND u.version=$5 AND NOT EXISTS (SELECT 1 FROM signal_memberships m WHERE m.user_id=u.id AND (m.status<>'active' OR (m.access_until IS NOT NULL AND m.access_until<=$6))) RETURNING token_hash",[hash,expires,user.id,user.password_hash,user.version,now]),
   profile:id=>one("SELECT u.id,u.username,u.display_name,COALESCE(m.plan_code,'signals') AS plan_code FROM signal_users u LEFT JOIN signal_memberships m ON m.user_id=u.id WHERE u.id=$1",[id]),
   resolve:(hash,now)=>one("SELECT u.id,u.username,u.display_name,COALESCE(m.plan_code,'signals') AS plan_code FROM signal_sessions s JOIN signal_users u ON u.id=s.user_id LEFT JOIN signal_memberships m ON m.user_id=u.id WHERE s.token_hash=$1 AND s.expires_at>$2 AND u.status='active' AND s.user_version=u.version AND NOT EXISTS (SELECT 1 FROM signal_memberships x WHERE x.user_id=u.id AND (x.status<>'active' OR (x.access_until IS NOT NULL AND x.access_until<=$2)))",[hash,now]),
+  portalByPortalId:id=>one('SELECT user_id,portal_user_id FROM portal_links WHERE portal_user_id=$1',[id]),
+  portalUpsert:async l=>{await query('INSERT INTO portal_links(user_id,portal_user_id,email,locale,is_tokai_student,billing_state,updated_at) VALUES($1,$2,$3,$4,$5,$6,$7) ON CONFLICT(user_id) DO UPDATE SET email=excluded.email,locale=excluded.locale,is_tokai_student=excluded.is_tokai_student,billing_state=excluded.billing_state,updated_at=excluded.updated_at',[l.userId,l.portalUserId,l.email,l.locale,l.tokai?1:0,l.billing,l.now]);},
+  portalCreateUser:async u=>{try{return await one("INSERT INTO signal_users(id,username,display_name,status,created_at) VALUES($1,$2,$3,'active',$4) RETURNING id,username",[u.id,u.username,u.name,u.now]);}catch(e){if(e.code==='23505'||e.code==='ERR_SQLITE_ERROR'&&/UNIQUE/.test(e.message))return null;throw e;}},
+  portalDetail:portalId=>one("SELECT u.id,u.username,u.display_name,u.status,pl.portal_user_id,pl.email,pl.locale,pl.is_tokai_student,pl.billing_state,pl.updated_at,m.plan_code,m.status AS membership_status,m.access_until,t.accepted_at AS terms_accepted_at FROM portal_links pl JOIN signal_users u ON u.id=pl.user_id LEFT JOIN signal_memberships m ON m.user_id=u.id LEFT JOIN signal_terms_acceptances t ON t.user_id=u.id AND t.terms_version='signals-copy-risk-v2' WHERE pl.portal_user_id=$1",[portalId]),
+  portalList:async(since,limit)=>(await query("SELECT u.id,u.status,pl.portal_user_id,pl.is_tokai_student,pl.billing_state,pl.updated_at,m.plan_code,m.status AS membership_status,m.access_until FROM portal_links pl JOIN signal_users u ON u.id=pl.user_id LEFT JOIN signal_memberships m ON m.user_id=u.id WHERE pl.updated_at>$1 ORDER BY pl.updated_at ASC LIMIT $2",[since,limit])).rows,
+  membershipOf:id=>one('SELECT plan_code,status,access_until FROM signal_memberships WHERE user_id=$1',[id]),
+  setMembershipSoft:({id,plan,status,accessUntil,now})=>query('UPDATE signal_memberships SET plan_code=$2,status=$3,access_until=$4,updated_at=$5 WHERE user_id=$1',[id,plan,status,accessUntil,now]),
+  ssoCreate:t=>query('INSERT INTO sso_tickets(token_hash,user_id,expires_at) VALUES($1,$2,$3)',[t.hash,t.userId,t.expires]),
+  ssoConsume:(hash,now)=>one('UPDATE sso_tickets SET used_at=$2 WHERE token_hash=$1 AND used_at IS NULL AND expires_at>$2 RETURNING user_id',[hash,now]),
+  ssoSession:(hash,userId,expires,now)=>one("INSERT INTO signal_sessions(token_hash,user_id,user_version,expires_at) SELECT $1,u.id,u.version,$2 FROM signal_users u WHERE u.id=$3 AND u.status='active' AND NOT EXISTS (SELECT 1 FROM signal_memberships m WHERE m.user_id=u.id AND (m.status<>'active' OR (m.access_until IS NOT NULL AND m.access_until<=$4))) RETURNING token_hash",[hash,expires,userId,now]),
+  idemGet:key=>one('SELECT status,body FROM integration_idempotency WHERE key=$1',[key]),
+  idemPut:(key,status,body,now)=>query('INSERT INTO integration_idempotency(key,status,body,created_at) VALUES($1,$2,$3,$4) ON CONFLICT(key) DO NOTHING',[key,status,body,now]),
+  auditPut:a=>query('INSERT INTO integration_audit(id,at,key_id,method,path,status) VALUES($1,$2,$3,$4,$5,$6)',[a.id,a.at,a.keyId,a.method,a.path.slice(0,300),a.status]),
+  integrationCleanup:async now=>{await query('DELETE FROM sso_tickets WHERE expires_at<$1',[now-86400000]);await query('DELETE FROM integration_idempotency WHERE created_at<$1',[now-7*86400000]);},
   logout:async hash=>{await query('DELETE FROM admin_sessions WHERE token_hash=$1',[hash]);await query('DELETE FROM signal_sessions WHERE token_hash=$1',[hash]);},
   cleanup:async now=>{await query('DELETE FROM admin_sessions WHERE expires_at<=$1',[now]);await query('DELETE FROM signal_sessions WHERE expires_at<=$1',[now]);}
  };
