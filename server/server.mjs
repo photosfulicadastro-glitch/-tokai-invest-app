@@ -1,6 +1,7 @@
 import http from 'node:http';
 import {createPush} from './push.mjs';
 import {createAuth,HttpError,readJson,TERMS_VERSION} from './auth.mjs';
+import {createIntegration} from './integration.mjs';
 import {parseLiveSource,embedUrl} from './live-source.mjs';
 import {sqliteStore,postgresStore} from './storage.mjs';
 import {createHash,timingSafeEqual,randomBytes,randomUUID} from 'node:crypto';
@@ -92,7 +93,7 @@ async function installerZip({license,agent,origin}){
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
 const copyServiceActive=(entry,time)=>entry?.user_status==='active'&&entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
 const copyAccessUntil=value=>{if(value===null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;const time=Date.parse(value+'T14:59:59.999Z');return Number.isSafeInteger(time)&&time>0?time:undefined;};
-export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',masterAccount='',teamNames=[],origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now()}={}) {
+export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',masterAccount='',teamNames=[],origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now(),integration=null}={}) {
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
  const syncPlan=async({userId,plan,status,accessUntil,now:time})=>await db.copy.setCopyMembership({userId,status:(plan==='copy'||plan==='signals_copy')&&status==='active'?'active':'paused',accessUntil,now:time});
@@ -100,6 +101,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   taken:async(account,server)=>!!await db.copy.agentByAccount(account,server),
   create:async({userId,account,server,now:time})=>{const settings=await db.copy.settings();await db.copy.createAgent({id:randomUUID(),userId,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(randomBytes(32)).digest('hex'),dailyLossPercent:Math.min(10,Number(settings.max_daily_loss_percent)),now:time});}
  });
+ const integ=createIntegration({repo:db.auth,copy:db.copy,syncPlan,now,copyHooks:{taken:async(account,server)=>!!await db.copy.agentByAccount(account,server),create:async({userId,account,server,now:time})=>{const settings=await db.copy.settings();await db.copy.createAgent({id:randomUUID(),userId,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(randomBytes(32)).digest('hex'),dailyLossPercent:Math.min(10,Number(settings.max_daily_loss_percent)),now:time});}},config:integration||{keyId:process.env.INTEGRATION_KEY_ID,secret:process.env.INTEGRATION_SECRET,allowedIps:(process.env.INTEGRATION_ALLOWED_IPS||'').split(',').map(x=>x.trim()).filter(Boolean),appUrl:process.env.INTEGRATION_APP_URL||undefined}});
  const historyStart=Number(process.env.HISTORY_START_UNIX||0);
  const pushReady=createPush(db.push,{now});
  const drain=()=>pushReady.then(p=>p.drain()).catch(()=>console.error('Entrega de notificações pendente'));
@@ -353,6 +355,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const settings=await db.copy.settings();
     return send(200,{ok:true,execution_mode:settings.execution_mode,max_daily_loss_percent:Math.min(Number(entry.daily_loss_percent),Number(settings.max_daily_loss_percent)),symbol:'XAUUSD'});
    }
+   if(await integ.route(req,send))return;
    if(await auth.route(req,send,isAdmin,token))return;
    let monitorId=null,operator=null;
    if(ingestion&&!allowed(token,ingestToken)){

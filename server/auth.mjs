@@ -3,7 +3,7 @@ import {promisify} from 'node:util';
 const scrypt=promisify(scryptCallback);
 const digest=s=>createHash('sha256').update(s).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
-const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,plan_code:['signals','copy','signals_copy'].includes(u.plan_code)?u.plan_code:'signals',role:'reader'});
+export const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,plan_code:['signals','copy','signals_copy'].includes(u.plan_code)?u.plan_code:'signals',role:'reader'});
 export const PAYMENT_PLANS={trial:{label:'Teste grátis (7 dias)',days:7},monthly:{label:'Mensal',days:30},quarterly:{label:'Trimestral',days:90},semiannual:{label:'Semestral',days:180},annual:{label:'Anual',days:365}};
 export const TERMS_VERSION='signals-copy-risk-v2';
 export class HttpError extends Error {constructor(status,message){super(message);this.status=status;}}
