@@ -424,11 +424,26 @@ if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class=
 
 
 /* ===== Janela AO VIVO (YouTube) — fica fora do #root para o vídeo não recarregar a cada atualização da tela ===== */
+let livePos=null;try{livePos=JSON.parse(localStorage.getItem('tokai.lw.pos')||'null');}catch{}
+function liveClamp(w,x,y){const W=window.innerWidth,H=window.innerHeight,bw=w.offsetWidth||300,bh=w.offsetHeight||190;return{x:Math.min(Math.max(0,x),Math.max(0,W-bw)),y:Math.min(Math.max(0,y),Math.max(0,H-bh))};}
+function liveApplyPos(w){
+ const st=w.style;
+ if(!livePos||w.classList.contains('lw-big')){st.left=st.top=st.right=st.bottom='';return;}
+ const p=liveClamp(w,livePos.x,livePos.y);st.left=p.x+'px';st.top=p.y+'px';st.right='auto';st.bottom='auto';
+}
+function liveDrag(w){
+ const bar=w.querySelector('.lw-bar');let off=null;
+ bar.addEventListener('pointerdown',e=>{if(e.target.closest('button')||w.classList.contains('lw-big'))return;const r=w.getBoundingClientRect();off={dx:e.clientX-r.left,dy:e.clientY-r.top};try{bar.setPointerCapture(e.pointerId);}catch{}w.classList.add('lw-dragging');e.preventDefault();});
+ bar.addEventListener('pointermove',e=>{if(!off)return;livePos=liveClamp(w,e.clientX-off.dx,e.clientY-off.dy);liveApplyPos(w);});
+ const end=()=>{if(!off)return;off=null;w.classList.remove('lw-dragging');try{localStorage.setItem('tokai.lw.pos',JSON.stringify(livePos));}catch{}};
+ bar.addEventListener('pointerup',end);bar.addEventListener('pointercancel',end);
+ window.addEventListener('resize',()=>liveApplyPos(w));window.addEventListener('orientationchange',()=>setTimeout(()=>liveApplyPos(w),250));
+}
 function liveEl(){
  let w=document.getElementById('live-window');if(w&&w.querySelector)return w;
  w=document.createElement('div');w.id='live-window';w.hidden=true;
  w.innerHTML='<div class="lw-bar"><span class="lw-dot"></span><b id="lw-label">AO VIVO</b><span class="lw-spacer"></span><button type="button" id="lw-size" aria-label="Ampliar">Ampliar</button><button type="button" id="lw-min" aria-label="Minimizar">–</button></div><div class="lw-video"><iframe title="Transmissão ao vivo" allow="autoplay; encrypted-media; picture-in-picture; fullscreen" allowfullscreen referrerpolicy="strict-origin-when-cross-origin" loading="lazy"></iframe><div class="lw-off"><img src="brand/tokai-logo.png" alt="TOKAI INVEST"><span>Sem transmissão no momento</span></div></div>';
- document.body.appendChild(w);
+ document.body.appendChild(w);liveDrag(w);
  w.querySelector('#lw-size').onclick=()=>{liveSize=liveSize==='big'?'mini':'big';liveClosed=false;syncLive();};
  w.querySelector('#lw-min').onclick=()=>{liveClosed=!liveClosed;syncLive();};
  return w;
@@ -440,7 +455,7 @@ function syncLive(){try{
  w=liveEl();
  const live=!!(liveInfo?.enabled&&liveInfo.embed_url);
  w.hidden=false;w.classList.toggle('lw-offline',!live);w.classList.toggle('lw-big',liveSize==='big'&&!liveClosed);w.classList.toggle('lw-closed',liveClosed);
- w.querySelector('#lw-label').textContent=live?'AO VIVO':'OFFLINE';
+ liveApplyPos(w);w.querySelector('#lw-label').textContent=live?'AO VIVO':'OFFLINE';
  w.querySelector('#lw-size').textContent=liveSize==='big'?'Reduzir':'Ampliar';
  w.querySelector('#lw-min').textContent=liveClosed?'Mostrar':'–';
  const f=w.querySelector('iframe'),url=live&&!liveClosed?liveInfo.embed_url:'';
