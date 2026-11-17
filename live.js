@@ -1,5 +1,6 @@
 'use strict';
 const root=document.getElementById('root');
+let liveInfo=null,liveFetched=false,liveSize='mini',liveClosed=false,adminLive=null,liveShownUrl='',liveAdminMsg='';
 let page='home',token='',data=null,error='',busy=false,tf='M5',histOp='all',histRange='today';
 let nav=[];
 let followCandles=true,chartScrollLeft=0,lastCandleStale=false,chartZoom=1,chartYScale=1,chartYPan=0,chartExpanded=false,chartBoxW=0,chartBoxH=0,bbOn3=true,bbOn4=true;const BB_PERIOD=20;
@@ -414,7 +415,7 @@ async function refresh(force=true){
 }
 // One request at a time; hidden tabs stop polling. Offline/error retries stay at 1s.
 let nextRefreshAt=0;
-setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}},500);
+setInterval(()=>{if(!document.hidden&&Date.now()>=nextRefreshAt){nextRefreshAt=Date.now()+(!error&&data?.online?500:1000);refresh(false);}liveTick();},500);
 document.addEventListener('focusin',e=>{if(e.target?.tagName==='SELECT')selectHold=true;});document.addEventListener('change',e=>{if(e.target?.tagName==='SELECT')selectHold=false;},true);document.addEventListener('focusout',e=>{if(e.target?.tagName==='SELECT'){selectHold=false;if(token&&identity&&data)setTimeout(render,80);}});
 document.addEventListener('fullscreenchange',()=>{if(!document.fullscreenElement&&chartExpanded&&window.innerWidth>650){chartExpanded=false;render();}else if(document.fullscreenElement&&chartExpanded){setTimeout(render,120);}});document.addEventListener('visibilitychange',()=>{if(!document.hidden)refresh();});let chartOrientationTimer;if(typeof window.addEventListener==='function')window.addEventListener('resize',()=>{if(token&&identity&&data&&(chartExpanded||page==='market'||page==='home')){clearTimeout(chartOrientationTimer);chartOrientationTimer=setTimeout(render,120);}});
 if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class="empty">Verificando acesso…</div>';refresh();}else login();
@@ -422,7 +423,6 @@ if(inviteCode){clearAccess();login();}else if(token){root.innerHTML='<div class=
 
 
 /* ===== Janela AO VIVO (YouTube) — fica fora do #root para o vídeo não recarregar a cada atualização da tela ===== */
-let liveInfo=null,liveFetched=false,liveSize='mini',liveClosed=false,adminLive=null,liveShownUrl='';
 function liveEl(){
  let w=document.getElementById('live-window');if(w)return w;
  w=document.createElement('div');w.id='live-window';w.hidden=true;
@@ -435,7 +435,7 @@ function liveEl(){
 function syncLive(){
  const want=!!(token&&identity&&page==='market'&&liveInfo?.enabled&&liveInfo.embed_url);
  const w=document.getElementById('live-window')||(want?liveEl():null);if(!w)return;
- if(!want){if(!w.hidden){w.hidden=true;const f=w.querySelector('iframe');f.src='about:blank';liveShownUrl='';}return;}
+ if(!want){if(liveShownUrl){w.querySelector('iframe').src='about:blank';liveShownUrl='';}w.hidden=true;return;}
  w.hidden=false;w.classList.toggle('lw-big',liveSize==='big'&&!liveClosed);w.classList.toggle('lw-closed',liveClosed);
  w.querySelector('#lw-size').textContent=liveSize==='big'?'Reduzir':'Ampliar';
  w.querySelector('#lw-min').textContent=liveClosed?'Mostrar':'–';
@@ -446,13 +446,12 @@ async function loadLive(){
  if(!token||!identity)return;
  try{const r=await api('/v1/live');liveInfo=r;liveFetched=true;if(r.enabled===false)liveClosed=false;syncLive();}catch{liveFetched=true;}
 }
-setInterval(()=>{if(token&&identity&&(page==='market'||liveFetched===false))loadLive();},15000);
-const liveKick=setInterval(()=>{if(token&&identity&&!liveFetched){loadLive();}},1500);
+let liveNextAt=0;
+function liveTick(){if(!token||!identity||Date.now()<liveNextAt)return;if(page==='market'||!liveFetched){liveNextAt=Date.now()+(liveFetched?15000:1500);loadLive();}}
 function liveAdminCard(){
  const a=adminLive||{},on=!!a.enabled;
  return card('Transmissão ao vivo (aba Mercado)','<p class="sub">Mostra uma janelinha <b>AO VIVO</b> na aba Mercado dos alunos. Inicie a transmissão no YouTube (pelo OBS) e cole aqui o <b>link da transmissão</b> (youtube.com/watch?v=… ou youtube.com/live/…). Se a transmissão for <b>pública</b>, pode usar o link do canal no formato youtube.com/channel/UC…: aí não precisa trocar a cada live. Links com @nome não funcionam.</p><div class="field"><label for="live-source">Link da transmissão ou ID</label><input id="live-source" type="text" autocomplete="off" placeholder="https://www.youtube.com/watch?v=..." value="'+esc(a.source||'')+'"></div><div class="row"><span>Status: <b class="'+(on?'green':'muted')+'">'+(on?'Ao vivo ligado (alunos veem a janela)':'Desligado')+'</b></span></div><div class="tools"><button class="btn goldbtn" type="button" id="live-save">Salvar e ligar</button><button class="btn" type="button" id="live-toggle">'+(on?'Desligar':'Ligar')+'</button></div>'+(liveAdminMsg?'<p class="sub" role="status">'+esc(liveAdminMsg)+'</p>':''));
 }
-let liveAdminMsg='';
 function bindLiveAdmin(){
  const act=async body=>{liveAdminMsg='';try{adminLive=await api('/v1/admin/live',body);liveInfo={enabled:adminLive.enabled,embed_url:adminLive.embed_url};liveAdminMsg=adminLive.enabled?'Ao vivo ligado.':'Ao vivo desligado.';}catch(e){liveAdminMsg=e.message;}render();};
  document.getElementById('live-save')?.addEventListener('click',()=>act({source:document.getElementById('live-source').value,enabled:true}));
