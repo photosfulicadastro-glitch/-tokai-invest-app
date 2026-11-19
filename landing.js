@@ -48,7 +48,7 @@
   renderMarket('1');
   const ns='http://www.w3.org/2000/svg';
   function svgNode(tag,attrs) { const n=document.createElementNS(ns,tag); for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v); return n; }
-  // Simulação com a mesma leitura do painel real: velas, Bollinger 20/3 (vermelha) e 20/4 (amarela), setas de entrada e saída. Dados 100% fictícios.
+  // Simulação ilustrativa com dados 100% fictícios.
   const N=60, W=640, H=300, PL=10, PR=62, PT=14, PB=26;
   const sma=(a,i,n)=>{let s=0;for(let k=i-n+1;k<=i;k++)s+=a[k].c;return s/n;};
   const sd=(a,i,n,m)=>{let s=0;for(let k=i-n+1;k<=i;k++)s+=(a[k].c-m)**2;return Math.sqrt(s/n);};
@@ -65,16 +65,16 @@
   function evaluate(idx){
     const d=sim.data; if(idx<19)return;
     const m=sma(d,idx,20),s=sd(d,idx,20,m),c=d[idx].c;
-    if(sim.pos===0){ if(c<m-3*s){sim.pos=1;sim.marks.push({i:idx,t:'buy'});} else if(c>m+3*s){sim.pos=-1;sim.marks.push({i:idx,t:'sell'});} }
-    else if((sim.pos===1&&c>=m)||(sim.pos===-1&&c<=m)){sim.pos=0;sim.marks.push({i:idx,t:'exit'});}
+    if(sim.pos===0){ if(c<m-3*s){sim.pos=1;sim.marks.push({i:idx,t:'buy',p:c});} else if(c>m+3*s){sim.pos=-1;sim.marks.push({i:idx,t:'sell',p:c});} }
+    else if((sim.pos===1&&c>=m)||(sim.pos===-1&&c<=m)){sim.pos=0;sim.marks.push({i:idx,t:'exit',p:c});}
   }
   function seed(){
     sim.data=[];sim.marks=[];sim.pos=0;sim.last=2645;
-    for(let i=0;i<N;i++){const c=nextCandle();sim.data.push(c);sim.last=c.c;evaluate(i);}
+    for(let i=0;i<N;i++){const c=nextCandle();sim.data.push(c);sim.last=c.c;evaluate(i-1);}
   }
   function shift(){
     sim.data.shift();sim.marks=sim.marks.map(k=>({...k,i:k.i-1})).filter(k=>k.i>=0);
-    const c=nextCandle();sim.data.push(c);sim.last=c.c;evaluate(sim.data.length-1);
+    const c=nextCandle();sim.data.push(c);sim.last=c.c;evaluate(sim.data.length-2);
   }
   function drawSim(svg){
     svg.replaceChildren();
@@ -103,7 +103,12 @@
       if(k.t==='buy')n=svgNode('path',{d:`M${px} ${y(c.l)+14}V${y(c.l)+5}M${px-4} ${y(c.l)+9}L${px} ${y(c.l)+4}L${px+4} ${y(c.l)+9}`,stroke:'#63e5b8','stroke-width':2,fill:'none'});
       else if(k.t==='sell')n=svgNode('path',{d:`M${px} ${y(c.h)-14}V${y(c.h)-5}M${px-4} ${y(c.h)-9}L${px} ${y(c.h)-4}L${px+4} ${y(c.h)-9}`,stroke:'#ff91a3','stroke-width':2,fill:'none'});
       else n=svgNode('path',{d:`M${px+5} ${y(c.c)}H${px+15}M${px+11} ${y(c.c)-4}L${px+15} ${y(c.c)}L${px+11} ${y(c.c)+4}`,stroke:'#f5d33d','stroke-width':2,fill:'none'});
-      svg.append(n);});
+      svg.append(n);
+      const lbl=svgNode('text',{'font-size':10,'font-weight':600,fill:k.t==='buy'?'#63e5b8':k.t==='sell'?'#ff91a3':'#f5d33d','text-anchor':px>W-PR-90?'end':'start'});
+      const name=k.t==='buy'?'Compra':k.t==='sell'?'Venda':'Saída';
+      const ly=k.t==='buy'?y(c.l)+26:k.t==='sell'?y(c.h)-18:y(c.c)-9;
+      lbl.setAttribute('x',px>W-PR-90?px-4:px+(k.t==='exit'?6:-4));lbl.setAttribute('y',ly);
+      lbl.textContent=name+' '+k.p.toFixed(2);svg.append(lbl);});
     const lc=d[d.length-1].c;
     svg.append(svgNode('path',{d:`M${PL} ${y(lc)}H${W-PR}`,stroke:'#cfe3f7','stroke-dasharray':'2 3','stroke-width':.8}));
     svg.append(svgNode('rect',{x:W-PR+2,y:y(lc)-8,width:PR-4,height:16,fill:'#2a6fb0',rx:2}));
