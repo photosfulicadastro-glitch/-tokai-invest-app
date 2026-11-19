@@ -178,3 +178,25 @@ td{padding:14px 8px;border-bottom:1px solid #ffffff0d}
 
 .lang-switch{border:1px solid rgba(160,200,255,.35);background:transparent;color:inherit;border-radius:8px;padding:8px 12px;font:inherit;font-weight:800;font-size:13px;letter-spacing:.5px;cursor:pointer}
 .lang-nav{margin-left:8px}
+
+/* Trade Room: perspectivas e planos */
+.persp{display:grid;grid-template-columns:1.35fr 1fr;gap:14px}
+.win{background:linear-gradient(150deg,#0f2a49,#091a30);border:1px solid var(--line);border-radius:18px;padding:22px;min-width:0}
+.win small{color:#85dfff;letter-spacing:.08em;font-size:12px}
+.win-screen{height:170px;margin-top:16px;border-radius:10px;display:flex;align-items:center;justify-content:center;text-align:center;padding:12px;color:#b8d1e6;font-size:14px}
+.win-chart{background:linear-gradient(180deg,#142a45aa,#0b192a),repeating-linear-gradient(90deg,transparent 0 49px,#29405b 50px),repeating-linear-gradient(0deg,transparent 0 29px,#29405b 30px)}
+.win-stream{background:#050a12;color:#9bb1c6}
+.plans{display:grid;grid-template-columns:repeat(3,1fr);gap:18px}
+.plan{padding:28px;border:1px solid var(--line);border-radius:18px;background:linear-gradient(150deg,#0f2a49,#091a30);min-width:0}
+.plan h3{margin:10px 0 14px}
+.plan p{margin:2px 0 14px;color:var(--muted);font-size:14px}
+.plan .price{font-size:30px;font-weight:800;color:#fff;line-height:1.2}
+.plan .price small{font-size:14px;font-weight:600;color:var(--muted);margin-left:4px}
+.plan .tag{display:inline-block;padding:4px 10px;border-radius:20px;background:#0e3853;color:#66d8ff;font-size:12px;font-weight:700}
+#planos .note{text-align:center;margin-top:22px}
+@media(max-width:860px){.persp,.plans{grid-template-columns:1fr}}
+.plan{position:relative}
+.plan .tag{position:absolute;top:20px;right:20px}
+.plan h3{margin:0 0 14px}
+#faq .cards{grid-template-columns:repeat(2,1fr);max-width:900px;margin:0 auto}
+@media(max-width:860px){#faq .cards{grid-template-columns:1fr}}
