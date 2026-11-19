@@ -78,6 +78,7 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
     if(needsCopy&&(!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120))throw new HttpError(400,'Para Copy, informe a conta MT5 e o servidor da corretora.');
     const paymentPlan=b.payment_plan===undefined?'monthly':Object.hasOwn(PAYMENT_PLANS,b.payment_plan)?b.payment_plan:null;
     if(!paymentPlan)throw new HttpError(400,'Escolha um plano de pagamento válido.');
+    if(roomOnly&&(paymentPlan==='trial'||paymentPlan==='quarterly'))throw new HttpError(400,'Escolha mensal, semestral ou anual.');
     if(needsCopy&&await copyHooks.taken?.(account,server))throw new HttpError(409,'Esta conta MT5 já está vinculada a outro aluno.');
     const password=await expensive(()=>passwordHash(b.password));
     const registered=await repo.register({id:randomUUID(),username,name,passwordHash:password,paymentPlan,plan,account:needsCopy?account:null,server:needsCopy?server:null,now:now()});

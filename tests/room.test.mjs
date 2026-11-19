@@ -36,7 +36,9 @@ test('modo Trade Room: plano único, sem Copy, sinais liberados e guia do copy n
   assert.equal((await t.rq('/v1/copy/me',tok)).s,410);
   assert.equal((await t.rq('/v1/admin/copy/overview',admin)).s,410);
   assert.equal((await t.rq('/v1/copy/activate','',{})).s,410);
-  const reg=await t.rq('/v1/auth/register','',{name:'Sem MT5',username:'sem.mt5',password:PASSWORD,payment_plan:'trial',terms_accepted:true,terms_version:TERMS});
+  assert.equal((await t.rq('/v1/auth/register','',{name:'Teste',username:'sem.trial',password:PASSWORD,payment_plan:'trial',terms_accepted:true,terms_version:TERMS})).s,400);
+  assert.equal((await t.rq('/v1/auth/register','',{name:'Trim',username:'sem.trim',password:PASSWORD,payment_plan:'quarterly',terms_accepted:true,terms_version:TERMS})).s,400);
+  const reg=await t.rq('/v1/auth/register','',{name:'Sem MT5',username:'sem.mt5',password:PASSWORD,payment_plan:'annual',terms_accepted:true,terms_version:TERMS});
   assert.equal(reg.s,202);
   assert.deepEqual((await t.rq('/v1/room/copy-guide',tok)).d,{title:'',link:'',text:''});
   assert.equal((await t.rq('/v1/admin/copy-guide',tok,{text:'x'})).s,403);
