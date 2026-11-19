@@ -30,7 +30,7 @@ export async function createPush(repo,{now=()=>Date.now(),transport=webpush.send
    const sub=await repo.own(user,b.endpoint||'');if(!sub||!await repo.authorized(sub.id))throw new HttpError(400,'Ative as notificações primeiro.');
    for(const [k,t] of tests)if(t<now()-60000)tests.delete(k);
    if(tests.has(sub.id))throw new HttpError(429,'Aguarde um minuto antes de testar novamente.');tests.set(sub.id,now());
-   try{await transport(JSON.parse(sub.body),JSON.stringify({title:'TOKAI INVEST · Teste',body:'Notificações ativadas neste aparelho.',tag:'tokai-test'}),options);}catch(e){if([404,410].includes(e.statusCode))await repo.remove(sub.id);throw new HttpError(503,'Não foi possível entregar o teste. Ative novamente e tente mais tarde.');}
+   try{await transport(JSON.parse(sub.body),JSON.stringify({title:'TRADE ROOM · Teste',body:'Notificações ativadas neste aparelho.',tag:'tokai-test'}),options);}catch(e){if([404,410].includes(e.statusCode))await repo.remove(sub.id);throw new HttpError(503,'Não foi possível entregar o teste. Ative novamente e tente mais tarde.');}
    send(200,{ok:true});return true;
   }
   throw new HttpError(404,'Rota não encontrada.');

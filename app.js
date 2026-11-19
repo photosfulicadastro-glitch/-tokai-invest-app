@@ -37,7 +37,7 @@ function openInfo(kind = "info") {
   const text = document.querySelector("#modal-text");
   const messages = {
     info: [
-      "TOKAI INVEST é uma demonstração visual",
+      "TRADE ROOM é uma demonstração visual",
       "Este protótipo não possui acesso ao MT5, corretoras, saldo de clientes ou preços ao vivo. Nenhum botão nesta página executa ordens.",
     ],
     operation: [
