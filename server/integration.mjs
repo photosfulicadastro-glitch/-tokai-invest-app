@@ -1,7 +1,7 @@
 // Integração Portal TOKAI -> Sistema de Sinais. Tudo aqui é novo: sem INTEGRATION_SECRET a API fica desligada.
 import {createHash,createHmac,randomBytes,randomUUID,timingSafeEqual} from 'node:crypto';
 import {HttpError,readJson,publicUser,TERMS_VERSION} from './auth.mjs';
-const PLANS=['signals','copy','signals_copy'];
+const PLANS=['signals','copy','signals_copy','room'];
 const sha=s=>createHash('sha256').update(s).digest('hex');
 async function rawBody(req,limit=16384){
  let size=0;const chunks=[];
@@ -15,8 +15,8 @@ function clientIp(req){
  const xff=String(req.headers['x-forwarded-for']||'').split(',').map(s=>s.trim()).filter(Boolean);
  return (xff.length?xff[xff.length-1]:req.socket?.remoteAddress||'').replace(/^::ffff:/,'');
 }
-export function createIntegration({repo,copy,syncPlan,copyHooks={},now=()=>Date.now(),config={}}){
- const {keyId,secret,allowedIps=[],appUrl='https://sinais.tokaiinvest.jp'}=config;
+export function createIntegration({repo,copy,syncPlan,copyHooks={},now=()=>Date.now(),config={},roomOnly=false,toPublic=publicUser}){
+ const {keyId,secret,allowedIps=[],appUrl='https://traderoom.tokaiinvest.jp'}=config;
  const enabled=typeof keyId==='string'&&/^[A-Za-z0-9_-]{3,40}$/.test(keyId)&&typeof secret==='string'&&secret.length>=32;
  const hits=new Map();
  function limit(key,max,ms){
@@ -33,13 +33,14 @@ export function createIntegration({repo,copy,syncPlan,copyHooks={},now=()=>Date.
   if(!used)throw new HttpError(401,'Link de entrada inválido ou expirado.');
   const value=randomBytes(32).toString('base64url'),expires=t+12*3600000;
   if(!await repo.ssoSession(sha(value),used.user_id,expires,t))throw new HttpError(403,'Acesso indisponível. Fale com a equipe Tokai.');
-  send(200,{token:value,expires_at:expires,user:publicUser(await repo.profile(used.user_id))});
+  send(200,{token:value,expires_at:expires,user:toPublic(await repo.profile(used.user_id))});
  }
  async function upsert(portalId,b){
   const email=typeof b.email==='string'?b.email.trim().toLowerCase():'';
   const name=typeof b.name==='string'?b.name.trim():'';
   if(!/^[^@\s]{1,64}@[^@\s]{1,120}$/.test(email)||email.length>150||!name||name.length>80)throw new HttpError(422,'Informe e-mail e nome válidos.');
   if(!PLANS.includes(b.plan))throw new HttpError(422,'Plano inválido.');
+  const plan=roomOnly?'room':b.plan;
   if(!['active','paused'].includes(b.status))throw new HttpError(422,'Status inválido.');
   let until=null;
   if(b.access_until!==null&&b.access_until!==undefined){until=Date.parse(b.access_until);if(typeof b.access_until!=='string'||!Number.isSafeInteger(until)||until<=0)throw new HttpError(422,'access_until inválido (use data ISO 8601).');}
@@ -48,7 +49,7 @@ export function createIntegration({repo,copy,syncPlan,copyHooks={},now=()=>Date.
   const billing=b.billing_state===undefined?null:typeof b.billing_state==='string'&&/^[a-z_]{1,30}$/.test(b.billing_state)?b.billing_state:undefined;
   if(!locale||billing===undefined)throw new HttpError(422,'locale ou billing_state inválido.');
   if(b.is_tokai_student!==undefined&&typeof b.is_tokai_student!=='boolean')throw new HttpError(422,'is_tokai_student deve ser verdadeiro ou falso.');
-  const needsCopy=b.plan==='copy'||b.plan==='signals_copy';
+  const needsCopy=!roomOnly&&(plan==='copy'||plan==='signals_copy');
   const account=b.mt5_account===undefined||b.mt5_account===null?'':String(b.mt5_account).trim(),server=typeof b.broker_server==='string'?b.broker_server.trim():'';
   if(account&&(!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120))throw new HttpError(422,'Conta MT5 ou servidor inválido.');
   const t=now();let link=await repo.portalByPortalId(portalId),created=false,userId=link?.user_id;
@@ -64,10 +65,10 @@ export function createIntegration({repo,copy,syncPlan,copyHooks={},now=()=>Date.
    if(await copyHooks.taken?.(account,server))throw new HttpError(409,'Esta conta MT5 já está vinculada a outro aluno.');
   }
   const prev=await repo.membershipOf(userId);
-  const same=prev&&prev.plan_code===b.plan&&prev.status===b.status;
-  if(!prev||!same)await repo.setMembership({id:userId,plan:b.plan,status:b.status,accessUntil:until,now:t});
-  else if(Number(prev.access_until)!==until)await repo.setMembershipSoft({id:userId,plan:b.plan,status:b.status,accessUntil:until,now:t});
-  await syncPlan({userId,plan:b.plan,status:b.status,accessUntil:until,now:t});
+  const same=prev&&prev.plan_code===plan&&prev.status===b.status;
+  if(!prev||!same)await repo.setMembership({id:userId,plan,status:b.status,accessUntil:until,now:t});
+  else if(Number(prev.access_until)!==until)await repo.setMembershipSoft({id:userId,plan,status:b.status,accessUntil:until,now:t});
+  await syncPlan({userId,plan,status:b.status,accessUntil:until,now:t});
   if(needsCopy&&account&&!await copy.agentForUser(userId))await copyHooks.create?.({userId,account,server,now:t});
   await repo.portalUpsert({userId,portalUserId:portalId,email,locale,tokai:b.is_tokai_student===true,billing,now:t});
   if(b.terms_version===TERMS_VERSION&&b.terms_accepted_at!==undefined){const at=Date.parse(b.terms_accepted_at);await repo.acceptTerms(userId,TERMS_VERSION,Number.isSafeInteger(at)&&at>0&&at<=t+60000?at:t);}

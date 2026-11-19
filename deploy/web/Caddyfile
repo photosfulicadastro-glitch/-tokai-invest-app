@@ -24,3 +24,20 @@
         file_server
     }
 }
+
+# Endereço antigo: a API segue respondendo (monitores MT5 já instalados) e o site redireciona para o domínio novo.
+# Sem LEGACY_DOMAIN no .env, este bloco fica inerte (escuta só uma porta interna sem uso).
+{$LEGACY_DOMAIN:http://legacy.invalid:8081} {
+    encode zstd gzip
+
+    @api path /api/*
+    handle @api {
+        header Cache-Control "no-store"
+        uri strip_prefix /api
+        reverse_proxy api:8080
+    }
+
+    handle {
+        redir https://{$PUBLIC_DOMAIN}{uri} permanent
+    }
+}

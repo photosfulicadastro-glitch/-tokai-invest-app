@@ -36,7 +36,7 @@ async function monitorZip({key,name,account,origin}){
   'INSTALAÇÃO',
   '1. No MetaTrader 5 logado na conta-mãe, abra Arquivo > Abrir Pasta de Dados > MQL5 > Experts.',
   '2. Copie TokaiMonitor.ex5 para essa pasta e reinicie o MT5 (ou clique com o botão direito em Experts > Atualizar).',
-  '3. Em Ferramentas > Opções > Expert Advisors, marque Permitir WebRequest e adicione https://sinais.tokaiinvest.jp',
+  '3. Em Ferramentas > Opções > Expert Advisors, marque Permitir WebRequest e adicione '+cleanSetValue(origin).replace(/\/$/,''),
   '4. Abra um gráfico XAUUSD (ou o símbolo de ouro da corretora) e arraste o TokaiMonitor para ele.',
   '5. Na aba Inputs, clique em Carregar e escolha TokaiMonitor.set deste pacote. Se o símbolo do ouro tiver outro nome, ajuste GoldSymbol.',
   '6. Ative Algo Trading (botão no topo do MT5) e confirme o rosto sorridente no canto do gráfico.',
@@ -77,7 +77,7 @@ async function installerZip({license,agent,origin}){
   '1. No MetaTrader 5, abra Arquivo > Abrir Pasta de Dados > MQL5 > Experts.',
   '2. Copie TokaiCopyFollower.ex5 para a pasta Experts. Se o pacote trouxer somente o arquivo .mq5, abra-o no MetaEditor e compile para gerar o .ex5.',
   '3. Anexe o EA compilado a um gráfico do XAUUSD da conta vinculada.',
-  '4. Em Ferramentas > Opções > Expert Advisors, adicione https://sinais.tokaiinvest.jp à lista de WebRequest permitido.',
+  '4. Em Ferramentas > Opções > Expert Advisors, adicione '+cleanSetValue(origin).replace(/\/$/,'')+' à lista de WebRequest permitido.',
   '5. Na aba Inputs do EA, use Carregar e selecione TokaiCopyFollower.set deste pacote.',
   '6. Ative Permitir negociação algorítmica quando o modo global do Copy autorizar esta conta.',
   '7. A configuração padrão consulta a conta-mãe a cada 1 segundo (PollSeconds).',
@@ -93,15 +93,18 @@ async function installerZip({license,agent,origin}){
 const allowed=(supplied,expected)=>typeof expected==='string'&&expected.length>=32&&timingSafeEqual(hash(supplied),hash(expected));
 const copyServiceActive=(entry,time)=>entry?.user_status==='active'&&entry?.membership_status==='active'&&(!entry.membership_access_until||Number(entry.membership_access_until)>=time);
 const copyAccessUntil=value=>{if(value===null||value==='')return null;if(typeof value!=='string'||!/^\d{4}-\d{2}-\d{2}$/.test(value))return undefined;const time=Date.parse(value+'T14:59:59.999Z');return Number.isSafeInteger(time)&&time>0?time:undefined;};
-export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',masterAccount='',teamNames=[],origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now(),integration=null,copyAutoRelease=process.env.COPY_AUTO_RELEASE==='1'}={}) {
+export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken,source='principal',masterAccount='',teamNames=[],origin='https://photosfulicadastro-glitch.github.io',now=()=>Date.now(),integration=null,copyAutoRelease=process.env.COPY_AUTO_RELEASE==='1',copyEngine=process.env.COPY_ENGINE!=='0'}={}) {
+ const roomOnly=!copyEngine;
  if(!ingestToken||!viewerToken||ingestToken.length<32||viewerToken.length<32||ingestToken===viewerToken)throw Error('Configure duas chaves diferentes, com pelo menos 32 caracteres');
  const db=storage||sqliteStore(dbPath);
- const syncPlan=async({userId,plan,status,accessUntil,now:time})=>await db.copy.setCopyMembership({userId,status:(plan==='copy'||plan==='signals_copy')&&status==='active'?'active':'paused',accessUntil,now:time});
- const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken),syncPlan,{
+ const syncPlan=async({userId,plan,status,accessUntil,now:time})=>roomOnly?undefined:await db.copy.setCopyMembership({userId,status:(plan==='copy'||plan==='signals_copy')&&status==='active'?'active':'paused',accessUntil,now:time});
+ const copyHooks=roomOnly?{}:{
   taken:async(account,server)=>!!await db.copy.agentByAccount(account,server),
   create:async({userId,account,server,now:time})=>{const settings=await db.copy.settings();await db.copy.createAgent({id:randomUUID(),userId,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(randomBytes(32)).digest('hex'),dailyLossPercent:Math.min(10,Number(settings.max_daily_loss_percent)),now:time});}
- });
- const integ=createIntegration({repo:db.auth,copy:db.copy,syncPlan,now,copyHooks:{taken:async(account,server)=>!!await db.copy.agentByAccount(account,server),create:async({userId,account,server,now:time})=>{const settings=await db.copy.settings();await db.copy.createAgent({id:randomUUID(),userId,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(randomBytes(32)).digest('hex'),dailyLossPercent:Math.min(10,Number(settings.max_daily_loss_percent)),now:time});}},config:integration||{keyId:process.env.INTEGRATION_KEY_ID,secret:process.env.INTEGRATION_SECRET,allowedIps:(process.env.INTEGRATION_ALLOWED_IPS||'').split(',').map(x=>x.trim()).filter(Boolean),appUrl:process.env.INTEGRATION_APP_URL||undefined}});
+ };
+ const auth=createAuth(db.auth,now,value=>allowed(value,viewerToken),syncPlan,copyHooks,{roomOnly});
+ if(roomOnly)Promise.resolve(db.auth.plansToRoom()).catch(()=>console.error('Migração de planos pendente'));
+ const integ=createIntegration({repo:db.auth,copy:db.copy,syncPlan,now,roomOnly,toPublic:auth.publicUser,copyHooks:{taken:async(account,server)=>!!await db.copy.agentByAccount(account,server),create:async({userId,account,server,now:time})=>{const settings=await db.copy.settings();await db.copy.createAgent({id:randomUUID(),userId,expectedAccount:account,brokerServer:server,tokenHash:createHash('sha256').update(randomBytes(32)).digest('hex'),dailyLossPercent:Math.min(10,Number(settings.max_daily_loss_percent)),now:time});}},config:integration||{keyId:process.env.INTEGRATION_KEY_ID,secret:process.env.INTEGRATION_SECRET,allowedIps:(process.env.INTEGRATION_ALLOWED_IPS||'').split(',').map(x=>x.trim()).filter(Boolean),appUrl:process.env.INTEGRATION_APP_URL||undefined}});
  const historyStart=Number(process.env.HISTORY_START_UNIX||0);
  const pushReady=createPush(db.push,{now});
  const drain=()=>pushReady.then(p=>p.drain()).catch(()=>console.error('Entrega de notificações pendente'));
@@ -116,6 +119,7 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   if(req.url==='/health'&&req.method==='GET'){try{await db.health();return send(200,{ok:true});}catch{return send(503,{ok:false});}}
   const dlMatch=/^\/v1\/(monitor|copy)\/download\/([A-Za-z0-9_-]{43})$/.exec((req.url||'').split('?')[0]);
   const dl=dlMatch?[dlMatch[0],dlMatch[2]]:null,dlKind=dlMatch?.[1];
+  if(dl&&roomOnly&&dlKind==='copy'){res.writeHead(410,{'Content-Type':'text/plain; charset=utf-8','Cache-Control':'no-store'});return res.end('O copy agora é feito direto na corretora Monaxa.');}
   if(dl){
    const hash=createHash('sha256').update(dl[1]).digest('hex');
    const html=(status,title,body,extra='')=>{res.writeHead(status,{'Content-Type':'text/html; charset=utf-8','Cache-Control':'no-store','X-Content-Type-Options':'nosniff','X-Frame-Options':'DENY','Referrer-Policy':'no-referrer','Content-Security-Policy':"default-src 'none'; style-src 'unsafe-inline'; form-action 'self'"});res.end('<!doctype html><html lang="pt-BR"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex"><title>TOKAI INVEST</title><style>body{font-family:system-ui,sans-serif;background:#0b1b2d;color:#e8eef5;display:grid;place-items:center;min-height:100vh;margin:0;padding:16px}main{max-width:460px;background:#10253b;border:1px solid #223348;border-radius:14px;padding:26px}h1{font-size:1.2rem;margin:0 0 10px}p{line-height:1.5;color:#b8c7d6}button{background:#f0b429;border:0;border-radius:10px;padding:12px 18px;font-weight:700;font-size:1rem;cursor:pointer}</style></head><body><main><h1>'+title+'</h1>'+body+extra+'</main></body></html>');};
@@ -161,8 +165,10 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
   const token=(req.headers.authorization||'').replace(/^Bearer /,'');
   const ingestion=req.url==='/v1/snapshot'&&req.method==='POST';
   try{
-   const user=allowed(token,viewerToken)?{role:'admin',name:'Administrador'}:!ingestion?await auth.resolve(token):null;
+   const user=allowed(token,viewerToken)?(roomOnly?{role:'admin',name:'Administrador',room:true}:{role:'admin',name:'Administrador'}):!ingestion?await auth.resolve(token):null;
    const isAdmin=user?.role==='admin';
+   if(roomOnly&&/^\/v1\/(admin\/)?copy(\/|$)/.test((req.url||'').split('?')[0]))return send(410,{error:'O copy agora é feito direto na corretora Monaxa.'});
+   if(req.url==='/v1/config'&&req.method==='GET')return send(200,{room:roomOnly});
    if(req.url==='/v1/admin/copy/close-all'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
     const b=await readJson(req),agent=typeof b.user_id==='string'?await db.copy.agentForUser(b.user_id):null;
@@ -235,6 +241,15 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     if(enabled&&!source)return send(400,{error:'Informe o link da transmissão antes de ligar o Ao vivo.'});
     await db.auth.settingSet('live',JSON.stringify({source,enabled}),now());
     return send(200,{enabled,embed_url:enabled?embedUrl(source):null,source:source?(source.kind==='channel'?'channel/':'')+source.id:'',kind:source?.kind||null});
+   }
+   if(req.url==='/v1/admin/copy-guide'&&req.method==='POST'){
+    if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
+    const b=await readJson(req,20000);
+    const title=typeof b.title==='string'?b.title.trim().slice(0,80):'',text=typeof b.text==='string'?b.text.trim().slice(0,6000):'';
+    let link=typeof b.link==='string'?b.link.trim():'';
+    if(link){try{const u=new URL(link);if(u.protocol!=='https:')throw 0;link=u.href;}catch{return send(400,{error:'Informe um link https válido ou deixe o campo vazio.'});}}
+    await db.auth.settingSet('copyguide',JSON.stringify({title,link,text}),now());
+    return send(200,{title,link,text});
    }
    if(req.url==='/v1/admin/copy/links'&&req.method==='POST'){
     if(!isAdmin)return send(403,{error:'Acesso administrativo necessário.'});
@@ -363,10 +378,14 @@ export function createApi({dbPath='tokai.sqlite',storage,ingestToken,viewerToken
     const found=/^[A-Za-z0-9_-]{43}$/.test(token)?await db.auth.monitorByHash(createHash('sha256').update(token).digest('hex')):null;
     if(!found)return send(401,{error:'Acesso não autorizado'});monitorId=found.id;operator={id:found.id,name:found.name};
    }else if(!ingestion&&!user)return send(401,{error:'Acesso não autorizado'});
-   const signalsPlan=isAdmin||['signals','signals_copy'].includes(user?.plan_code);
+   const signalsPlan=isAdmin||roomOnly||['signals','signals_copy'].includes(user?.plan_code);
    if((req.url==='/v1/state'||req.url.startsWith('/v1/push'))&&user&&!signalsPlan)return send(403,{error:'Seu plano não inclui o painel de sinais.'});
    if(await (await pushReady).route(req,send,user))return;
    if(req.url==='/v1/me'&&req.method==='GET')return send(200,{user});
+   if(req.url==='/v1/room/copy-guide'&&req.method==='GET'){
+    let g={};try{g=JSON.parse(await db.auth.settingGet('copyguide')||'{}');}catch{}
+    return send(200,{title:g.title||'',link:g.link||'',text:g.text||''});
+   }
    if(req.url==='/v1/live'&&req.method==='GET'){
     const cfg=JSON.parse(await db.auth.settingGet('live')||'{}');const src=cfg.source;
     return send(200,{enabled:!!(cfg.enabled&&src),embed_url:cfg.enabled?embedUrl(src):null,...(isAdmin?{source:src?(src.kind==='channel'?'channel/':'')+src.id:'',kind:src?.kind||null}:{})});

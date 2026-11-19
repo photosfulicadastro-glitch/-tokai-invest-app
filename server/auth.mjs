@@ -3,7 +3,7 @@ import {promisify} from 'node:util';
 const scrypt=promisify(scryptCallback);
 const digest=s=>createHash('sha256').update(s).digest('hex');
 const secret=()=>randomBytes(32).toString('base64url');
-export const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,plan_code:['signals','copy','signals_copy'].includes(u.plan_code)?u.plan_code:'signals',role:'reader'});
+export const publicUser=u=>({id:u.id,username:u.username,name:u.display_name,plan_code:['signals','copy','signals_copy','room'].includes(u.plan_code)?u.plan_code:'signals',role:'reader'});
 export const PAYMENT_PLANS={trial:{label:'Teste grátis (7 dias)',days:7},monthly:{label:'Mensal',days:30},quarterly:{label:'Trimestral',days:90},semiannual:{label:'Semestral',days:180},annual:{label:'Anual',days:365}};
 export const TERMS_VERSION='signals-copy-risk-v2';
 export class HttpError extends Error {constructor(status,message){super(message);this.status=status;}}
@@ -29,7 +29,10 @@ function accessUntil(value,fallback){
  const time=Date.parse(value+'T14:59:59.999Z'); // fim do dia selecionado no horário do Japão
  return Number.isSafeInteger(time)&&time>0?time:undefined;
 }
-export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPlan=async()=>{},copyHooks={}){
+export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPlan=async()=>{},copyHooks={},opts={}){
+ const roomOnly=!!opts.roomOnly;
+ const adminUser=roomOnly?{role:'admin',name:'Administrador',room:true}:{role:'admin',name:'Administrador'};
+ const pu=u=>roomOnly?{...publicUser({...u,plan_code:'room'}),room:true}:publicUser(u);
  const attempts=new Map();let inFlight=0,lastCleanup=0;
  function throttle(key,max,ms){
   const time=now();for(const [k,v] of attempts)if(v.until<=time)attempts.delete(k);
@@ -38,9 +41,10 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
   if(entry.count>max)throw new HttpError(429,'Muitas tentativas. Aguarde alguns minutos.');
  }
  async function expensive(fn){if(inFlight>=2)throw new HttpError(429,'Servidor ocupado. Tente novamente em instantes.');inFlight++;try{return await fn();}finally{inFlight--;}}
- async function session(user){const value=secret(),expires=now()+12*60*60*1000;if(!await repo.session(digest(value),user,expires,now()))throw new HttpError(401,'Acesso indisponível. Entre novamente.');return {token:value,expires_at:expires,user:publicUser((await repo.profile(user.id))||user)};}
+ async function session(user){const value=secret(),expires=now()+12*60*60*1000;if(!await repo.session(digest(value),user,expires,now()))throw new HttpError(401,'Acesso indisponível. Entre novamente.');return {token:value,expires_at:expires,user:pu((await repo.profile(user.id))||user)};}
  return {
-  async resolve(token){if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;if(await repo.resolveAdmin(digest(token),now()))return {role:'admin',name:'Administrador'};const user=await repo.resolve(digest(token),now());return user?publicUser(user):null;},
+  publicUser:pu,
+  async resolve(token){if(!/^[A-Za-z0-9_-]{43}$/.test(token))return null;if(await repo.resolveAdmin(digest(token),now()))return adminUser;const user=await repo.resolve(digest(token),now());return user?pu(user):null;},
   async route(req,send,isAdmin,token){
    if(!req.url.startsWith('/v1/auth/')&&!req.url.startsWith('/v1/admin/'))return false;
    if(req.url.startsWith('/v1/admin/')&&!isAdmin)throw new HttpError(403,'Acesso administrativo necessário.');
@@ -48,11 +52,11 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
    if(req.method==='POST'&&req.url==='/v1/auth/admin-login'){
     throttle('admin-login',8,15*60000);const b=await readJson(req);
     if(typeof b.password!=='string'||b.password.length>128)throw new HttpError(401,'Senha inválida.');
-    if(checkMaster(b.password)){send(200,{token:b.password,user:{role:'admin',name:'Administrador'}});return true;}
+    if(checkMaster(b.password)){send(200,{token:b.password,user:adminUser});return true;}
     const admin=await repo.adminPassword();const ok=await expensive(()=>matches(b.password,admin?.password_hash));
     if(!ok)throw new HttpError(401,'Senha administrativa inválida.');
     const value=secret(),expires=now()+12*3600000;await repo.adminSession(digest(value),admin.version,expires);attempts.delete('admin-login');
-    send(200,{token:value,expires_at:expires,user:{role:'admin',name:'Administrador'}});return true;
+    send(200,{token:value,expires_at:expires,user:adminUser});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/admin/password'){
     throttle('admin-password',8,15*60000);const b=await readJson(req);
@@ -66,11 +70,11 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
    if(req.method==='POST'&&req.url==='/v1/auth/register'){
     throttle('global-register',20,60*60000);const b=await readJson(req);
     const username=typeof b.username==='string'?b.username.trim().toLowerCase():'',name=typeof b.name==='string'?b.name.trim():'';
-    const plan=['signals','copy','signals_copy'].includes(b.plan)?b.plan:null;
+    const plan=roomOnly?'room':['signals','copy','signals_copy'].includes(b.plan)?b.plan:null;
     const account=typeof b.mt5_account==='string'?b.mt5_account.trim():'',server=typeof b.broker_server==='string'?b.broker_server.trim():'';
     if(!/^[a-z0-9._-]{3,48}$/.test(username)||!name||name.length>80||typeof b.password!=='string'||b.password.length!==9||!plan)throw new HttpError(400,'Informe nome, usuário válido, plano e senha de exatamente 9 caracteres.');
     if(b.terms_accepted!==true||b.terms_version!==TERMS_VERSION)throw new HttpError(400,'Leia e aceite o Termo de Ciência de Riscos para concluir o cadastro.');
-    const needsCopy=plan==='copy'||plan==='signals_copy';
+    const needsCopy=!roomOnly&&(plan==='copy'||plan==='signals_copy');
     if(needsCopy&&(!/^[0-9]{4,20}$/.test(account)||server.length<3||server.length>120))throw new HttpError(400,'Para Copy, informe a conta MT5 e o servidor da corretora.');
     const paymentPlan=b.payment_plan===undefined?'monthly':Object.hasOwn(PAYMENT_PLANS,b.payment_plan)?b.payment_plan:null;
     if(!paymentPlan)throw new HttpError(400,'Escolha um plano de pagamento válido.');
@@ -109,7 +113,7 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
     const name=typeof b.name==='string'?b.name.trim():'';
     if(!/^[a-z0-9._-]{3,48}$/.test(username)||!name||name.length>80)throw new HttpError(400,'Informe nome (até 80 caracteres) e usuário (3 a 48 letras, números, ponto, hífen ou sublinhado).');
     const invite=secret(),expires=now()+72*3600000;
-    const plan=['signals','copy','signals_copy'].includes(b.plan)?b.plan:'signals';
+    const plan=roomOnly?'room':['signals','copy','signals_copy'].includes(b.plan)?b.plan:'signals';
     const until=accessUntil(b.access_until,now()+30*24*3600000);if(until===undefined)throw new HttpError(400,'Informe uma data de acesso válida.');
     const result=await repo.create({id:randomUUID(),username,name,hash:digest(invite),expires,now:now(),plan,accessUntil:until});
     if(!result)throw new HttpError(409,'Esse nome de usuário já está cadastrado.');
@@ -117,7 +121,7 @@ export function createAuth(repo,now=()=>Date.now(),checkMaster=()=>false,syncPla
     send(201,{invite,expires_at:expires,username});return true;
    }
    if(req.method==='POST'&&req.url==='/v1/admin/memberships'){
-    const b=await readJson(req);const plan=['signals','copy','signals_copy'].includes(b.plan)?b.plan:null;const status=['active','paused'].includes(b.status)?b.status:null;
+    const b=await readJson(req);const plan=roomOnly?'room':['signals','copy','signals_copy'].includes(b.plan)?b.plan:null;const status=['active','paused'].includes(b.status)?b.status:null;
     const until=accessUntil(b.access_until,undefined);if(typeof b.id!=='string'||!plan||!status||until===undefined)throw new HttpError(400,'Dados da mensalidade inválidos.');
     const member=await repo.setMembership({id:b.id,plan,status,accessUntil:until,now:now()});if(!member)throw new HttpError(404,'Usuário não encontrado.');
     await syncPlan({userId:b.id,plan,status,accessUntil:until,now:now()});

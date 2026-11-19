@@ -26,6 +26,11 @@ services:
       VIEWER_TOKEN: ${VIEWER_TOKEN}
       MT5_SOURCE: ${MT5_SOURCE:-principal}
       APP_ORIGIN: https://${PUBLIC_DOMAIN}
+      COPY_ENGINE: ${COPY_ENGINE:-1}
+      COPY_AUTO_RELEASE: ${COPY_AUTO_RELEASE:-0}
+      INTEGRATION_KEY_ID: ${INTEGRATION_KEY_ID:-}
+      INTEGRATION_SECRET: ${INTEGRATION_SECRET:-}
+      INTEGRATION_APP_URL: https://${PUBLIC_DOMAIN}
       HISTORY_START_UNIX: ${HISTORY_START_UNIX:-0}
       PORT: 8080
     security_opt:
@@ -51,6 +56,7 @@ services:
     restart: unless-stopped
     environment:
       PUBLIC_DOMAIN: ${PUBLIC_DOMAIN}
+      LEGACY_DOMAIN: ${LEGACY_DOMAIN:-http://legacy.invalid:8081}
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O /dev/null http://127.0.0.1:2019/config/ || exit 1"]
       interval: 30s

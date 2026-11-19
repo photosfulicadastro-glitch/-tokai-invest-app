@@ -3,7 +3,7 @@
 Documento de operação. Não contém chaves nem senhas: elas ficam só no arquivo `.env` da VPS (`/opt/tokai/app/.env`, fora do Git).
 
 ## Ambiente
-- Site e API: https://sinais.tokaiinvest.jp (VPS Hostinger; Docker Compose com `db` PostgreSQL 16, `api` Node 24 e `web` Caddy).
+- Site e API: https://traderoom.tokaiinvest.jp (antes sinais.tokaiinvest.jp; ver deploy/MIGRACAO_TRADE_ROOM.md) (VPS Hostinger; Docker Compose com `db` PostgreSQL 16, `api` Node 24 e `web` Caddy).
 - Deploy (☁️ terminal da VPS), sempre com o arquivo de configurações:
   `cd /opt/tokai/app && git pull --ff-only && cd deploy && docker compose --env-file /opt/tokai/app/.env up -d --build api web`
 - Branch de produção: `chore/hostinger-vps-prep`. Mudanças entram por Pull Request com testes verdes (`npm test`).
